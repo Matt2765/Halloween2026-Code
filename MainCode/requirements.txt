@@ -1,0 +1,11 @@
+pydub
+pymata4
+numpy
+sounddevice
+soundfile
+
+# Notes:
+# - pydub requires ffmpeg for MP3 handling. Install ffmpeg and add it to PATH.
+# - sounddevice/soundfile may require C libraries or wheels; see README_INSTALL.md at project root for tips.
+
+pyserial>=3.5

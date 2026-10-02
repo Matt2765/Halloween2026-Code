@@ -1,0 +1,38 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# --- Logs ---
+logs/
+
+# --- Virtual environments ---
+.venv/
+env/
+venv/
+
+# --- IDE / Editor junk ---
+.vscode/
+.idea/
+*.code-workspace
+
+# --- ESP32 / Arduino ---
+*.elf
+*.bin
+*.hex
+.pio/
+build/
+sdkconfig.old
+*.map
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local verification tools and logs
+.tools/
