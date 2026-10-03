@@ -118,6 +118,14 @@ Code received(const Received& r) {
     case SPRITE:
       doc["kind"]="sprite"; vals["index"]=b[0]; vals["command_session"]=get32(b+1); vals["command_seq"]=get32(b+5);
       vals["playback_confirmed"]=false; vals["serial_issued"]=true; vals["ready"]=true; break;
+    case LANTERN: {
+      const char* states[]={"off","solid_on","flickering_on","intense_flickering_on","flicker_out","intense_flicker_out"};
+      doc["kind"]="lantern"; vals["lantern_state"]=states[b[0]];
+      vals["synced"]=bool(b[1]); vals["brightness"]=b[2];
+      vals["next_command_id"]=get32(b+3); vals["sync_generation"]=get32(b+7);
+      vals["command_session"]=get32(b+11); vals["command_seq"]=get32(b+15);
+      vals["ready"]=true; break;
+    }
     case DIAGNOSTIC: {
       const char* keys[]={"drops","high_water","retries","unconfirmed","duplicates","send_errors"};
       for(int i=0;i<6;i++) vals[keys[i]]=get32(b+i*4);
@@ -156,19 +164,22 @@ void usbLine(const char* line) {
   if(!strcmp(op,"set_default")) operation=SET_DEFAULT;
   if(!strcmp(op,"play")) operation=PLAY;
   if(!strcmp(op,"next")) operation=NEXT;
+  if(!strcmp(op,"lantern")) operation=LANTERN_STATE;
   if(!operation||!doc["value"].is<uint16_t>()||!doc["duration_ms"].is<uint32_t>()) {
     resultLine(cid,id,"rejected","invalid_command"); return;
   }
   uint16_t value=doc["value"]; uint32_t duration=doc["duration_ms"];
-  if(duration>30000 || ((operation==MOVE||operation==SET_DEFAULT)&&value>180) || (operation==PLAY&&value>200)) {
+  if((operation!=LANTERN_STATE && duration>30000) || ((operation==MOVE||operation==SET_DEFAULT)&&value>180) || (operation==PLAY&&value>200) ||
+     (operation==LANTERN_STATE && (value>5 || duration<1 || duration==0xffffffff || !doc["sync_generation"].is<uint32_t>()))) {
     resultLine(cid,id,"rejected","out_of_range"); return;
   }
   if(operation==MOVE||operation==SET_DEFAULT) radio.cancel(id,SUPERSEDED);
   Request* request=nullptr;
   for(auto& r:requests) if(!r.used) { request=&r; break; }
   if(!request) { resultLine(cid,id,"rejected","queue_full"); return; }
-  auto p=radio.make(COMMAND,id,11,true); put32(p.payload,peer->session); p.payload[4]=operation;
+  auto p=radio.make(COMMAND,id,operation==LANTERN_STATE?15:11,true); put32(p.payload,peer->session); p.payload[4]=operation;
   put16(p.payload+5,value); put32(p.payload+7,duration);
+  if(operation==LANTERN_STATE) put32(p.payload+11,doc["sync_generation"].as<uint32_t>());
   if(!radio.send(p)) { resultLine(cid,id,"rejected","queue_full"); return; }
   request->used=true; request->seq=p.seq; strcpy(request->cid,cid);
   resultLine(cid,id,"pending","bridge_retry_owner",p.seq);

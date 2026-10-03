@@ -1,5 +1,25 @@
 # Unified ESP-NOW installation and protocol v1
 
+## Lantern extension
+
+The additive lantern integration is documented in [lanternNode/README.md](lanternNode/README.md).
+Reflash the bridge and new lantern nodes; network/version/channel and existing
+node payloads are unchanged. Type **9 lantern**, 19 bytes: state u8 (0..5 in
+README order), synced u8 (0/1), generated brightness u8, next cue u32, sync
+generation u32, associated command session u32 and sequence u32.
+
+Operation **5 lantern state** uses a **15-byte command**: intended boot session
+u32, operation u8, state u16, numbered cue u32, sync generation u32. The existing
+11-byte command layout remains for other operations. USB `op:"lantern"` uses
+`value` for the state index, `duration_ms` for the cue number (not a duration),
+and adds `sync_generation`. UUID `command_id` remains the delivery correlation
+ID. Device `kind:"lantern"` values are `lantern_state`, `synced`, `brightness`,
+`next_command_id`, `sync_generation`, `command_session`, `command_seq`, `ready`.
+Reports occur every 500 ms and on transitions, expire after six seconds at the
+host, and use the existing replaceable telemetry slots. Commands retain the
+existing per-device addressing, bridge retries, boot fence and ACK semantics.
+RSM adds `lantern(command_id, state, lantern_ids=None)` and `get_lantern_state`.
+
 All seven participating sketches must be reflashed together. There is no legacy
 radio fallback. The retired dimmerEsp and remoteSensor_TRANS/RECEIVER variants
 remain removed. Nano/Uno dimmers and the standalone MAC utility are outside this

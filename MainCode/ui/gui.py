@@ -156,8 +156,19 @@ def MainGUI():
 
     multi_heard = tk.Label(mid, text="last heard: --", font=small, bg="orange")
     multi_heard.grid(row=2, column=0, columnspan=8, sticky="w")
-    command_label = tk.Label(panel, text="", font=small, bg="orange", wraplength=405, justify="left")
-    command_label.grid(row=3, column=0, sticky="w", pady=(4, 0))
+    lantern_frame = tk.Frame(panel, bg="orange")
+    lantern_frame.grid(row=3, column=0, sticky="nw", pady=(4, 0))
+    tk.Label(lantern_frame, text="LANTERNS", font=("Helvetica bold", 13), bg="orange").grid(
+        row=0, column=0, columnspan=2, sticky="w")
+    lantern_labels = {}
+    for i, sid in enumerate(["LANTERN1", "LANTERN2", "LANTERN3", "LANTERN4"], start=1):
+        tk.Label(lantern_frame, text=sid, font=("Helvetica", 10), bg="orange").grid(
+            row=i, column=0, sticky="w", padx=(0, 8))
+        lbl = tk.Label(lantern_frame, text="unavailable", font=("Helvetica", 10), bg="orange")
+        lbl.grid(row=i, column=1, sticky="w")
+        lantern_labels[sid] = lbl
+    command_label = tk.Label(panel, text="", font=("Helvetica", 10), bg="orange", wraplength=405, justify="left")
+    command_label.grid(row=4, column=0, sticky="w", pady=(4, 0))
 
     # ===== Live updater (every 100 ms, reads only; no serial waits) =====
     def _update_status():
@@ -195,6 +206,18 @@ def MainGUI():
             else:
                 text = "HIGH" if state["output"] else "LOW"
                 text += " ready" if state["ready"] else " warming"
+            lbl.config(text=text)
+
+        for sid, lbl in lantern_labels.items():
+            state = rsm.get_lantern_state(sid)
+            if not state["available"] or "lantern_state" not in state:
+                text = state["state"]
+            else:
+                names = {"off": "off", "solid_on": "solid", "flickering_on": "flicker",
+                         "intense_flickering_on": "intense flicker", "flicker_out": "fading out",
+                         "intense_flicker_out": "intense fade out"}
+                mode = f"wait {state['next_command_id']}" if state["synced"] else "free"
+                text = f"{names[state['lantern_state']]} | {mode}"
             lbl.config(text=text)
 
         failure = rsm.command_failure()

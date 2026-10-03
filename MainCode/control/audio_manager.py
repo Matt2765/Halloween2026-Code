@@ -86,7 +86,7 @@ class _AudioSource(Protocol):
 primary_channels: ChannelMap = {
     "CabinRoom_PA": {"index": 0, "gain": 1.0},
     "CabinRoom_Wall": {"index": 1, "gain": 1.0},
-    "Center": {"index": 2, "gain": 1.0},
+    "DynamicHallway": {"index": 2, "gain": 1.0},
     "primary_LFE": {"index": 3, "gain": 1.0},
     "Surround Back Left": {"index": 4, "gain": 1.0},
     "Surround Back Right": {"index": 5, "gain": 1.0},

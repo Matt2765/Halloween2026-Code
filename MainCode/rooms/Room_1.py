@@ -15,21 +15,27 @@ def run():
 
     while house.HouseActive or house.Demo:
 
-        m1Digital_Write(33, 0) #torch lights
-        log_event("[Room_1] +120v Torch Lights ON")
+        #m1Digital_Write(33, 0) #torch lights
+        #log_event("[Room_1] +120v Torch Lights ON")
 
         setDoorState(1, "CLOPEN")
 
         play_audio("CabinRoom_Wall", "cabinRoomIntrov10.wav", gain=1)
         play_audio("CabinRoom_PA", "cabinRoomIntrov10.wav", gain=1)
 
-        while not rsm.obstructed("TOF1", block_mm=800, window_ms=250, min_consecutive=2):
-            #log_event(rsm.obstructed("TOF1", block_mm=800, window_ms=250, min_consecutive=2))
-            if BreakCheck():
-                return
-            t.sleep(0.05)
+        wait(6)
 
-        play_audio("Room_1", "splash1.wav", gain=1)
+        rsm.lantern(1, "intense_flickering_on")
+
+        wait(28)
+
+        rsm.lantern(2, "intense_flicker_out")
+
+        wait(16)
+
+        rsm.lantern(3, "flickering_on")
+
+        #play_audio("Room_1", "splash1.wav", gain=1)
 
         m1Digital_Write(33, 1) #torch lights
         log_event("[Room_1] +120v Torch Lights OFF")

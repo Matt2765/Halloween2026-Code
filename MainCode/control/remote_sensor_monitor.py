@@ -30,6 +30,8 @@ SILENCE_RECONNECT_MS = 3500
 PORT_HINTS = ("Silicon Labs", "CP210", "CH340", "USB-SERIAL", "ESP32", "WCH")
 MAX_DEVICES = 64
 MAX_COMMANDS = 128
+LANTERN_STATES = ("off", "solid_on", "flickering_on", "intense_flickering_on",
+                  "flicker_out", "intense_flicker_out")
 _manager = _proc = _shared = _txq = _commands = None
 _started = _disabled = False
 _hist = {}
@@ -117,7 +119,7 @@ def _store_device(shared, obj, now):
     session, seq = obj.get("session"), obj.get("seq")
     if not _valid_id(sid) or not _uint32(session) or not _uint32(seq) or not isinstance(vals, dict):
         raise ValueError("Invalid device identity or payload")
-    if kind not in ("tof", "button", "pir", "servo", "sprite"):
+    if kind not in ("tof", "button", "pir", "servo", "sprite", "lantern"):
         raise ValueError("Unsupported device kind")
     if kind == "button" and (type(vals.get("btn")) is not int or not 1 <= vals["btn"] <= 8 or type(vals.get("pressed")) is not bool):
         raise ValueError("Invalid button state")
@@ -129,6 +131,12 @@ def _store_device(shared, obj, now):
         raise ValueError("Invalid TOF measurement")
     if kind == "servo" and (type(vals.get("output_angle")) is not int or not 0 <= vals["output_angle"] <= 180 or type(vals.get("moving")) is not bool):
         raise ValueError("Invalid servo output")
+    if kind == "lantern" and (vals.get("lantern_state") not in LANTERN_STATES or
+                              type(vals.get("synced")) is not bool or
+                              type(vals.get("brightness")) is not int or not 0 <= vals["brightness"] <= 255 or
+                              not _uint32(vals.get("next_command_id")) or vals["next_command_id"] < 1 or
+                              not _uint32(vals.get("sync_generation"))):
+        raise ValueError("Invalid lantern state")
     rec = shared.get(sid)
     mac = obj.get("mac")
     if not isinstance(mac, str) or not re.fullmatch(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}", mac):
@@ -398,6 +406,11 @@ def get_servo_state(device_id):
     return dict(device_status(device_id), **(rec["vals"] if rec and rec["kind"] == "servo" else {}))
 
 
+def get_lantern_state(device_id):
+    rec = get(device_id)
+    return dict(device_status(device_id), **(rec["vals"] if rec and rec["kind"] == "lantern" else {}))
+
+
 def get_latency_ms(sensor_id):
     """Independent ESP uptime clocks cannot establish one-way latency."""
     return None
@@ -428,7 +441,14 @@ def tx_to_id(device_id, payload):
     payload = json.loads(payload) if isinstance(payload, str) else dict(payload)
     if any(payload.get(key, device_id) != device_id for key in ("id", "to")):
         raise ValueError("Conflicting logical destination")
-    if "set_default" in payload:
+    if payload.get("cmd") == "lantern":
+        state = payload.get("state")
+        if state not in LANTERN_STATES:
+            raise ValueError(f"Lantern state must be one of {LANTERN_STATES}")
+        op, value, duration = "lantern", LANTERN_STATES.index(state), payload.get("cue_id")
+        if type(duration) is not int or not 1 <= duration < 0xffffffff or not _uint32(payload.get("sync_generation")):
+            raise ValueError("Lantern cue ID must be 1..4294967294 and sync generation must be uint32")
+    elif "set_default" in payload:
         op, value, duration = "set_default", payload["set_default"], 300
     elif "angle" in payload:
         op, value, duration = "move", payload["angle"], payload.get("ramp_ms", 300)
@@ -438,8 +458,9 @@ def tx_to_id(device_id, payload):
         op, value, duration = "play", payload.get("index", payload.get("file")), 0
     else:
         raise ValueError("Supported commands: angle, set_default, play/index/file, next")
-    maximum = 180 if op in ("move", "set_default") else 200
-    if type(value) is not int or not 0 <= value <= maximum or type(duration) is not int or not 0 <= duration <= 30000:
+    maximum = 180 if op in ("move", "set_default") else 5 if op == "lantern" else 200
+    duration_maximum = 0xfffffffe if op == "lantern" else 30000
+    if type(value) is not int or not 0 <= value <= maximum or type(duration) is not int or not 0 <= duration <= duration_maximum:
         raise ValueError("Command value or duration out of range")
     cid, now = uuid.uuid4().hex, _now_ms()
     if _disabled:
@@ -459,6 +480,11 @@ def tx_to_id(device_id, payload):
             return cid
         request = {"v": 1, "type": "command", "host": connection["host"], "command_id": cid,
                    "id": device_id, "target_session": device["session"], "op": op, "value": value, "duration_ms": duration}
+        if op == "lantern":
+            if device["kind"] != "lantern":
+                _commands[cid] = dict(rec, status="rejected", reason="not_a_lantern")
+                return cid
+            request["sync_generation"] = payload["sync_generation"]
         _commands[cid] = rec
         try:
             _txq.put_nowait(request)
@@ -485,6 +511,35 @@ def servo(device_id, angle, ramp_ms=None):
 
 def sprite_play(device_id, index):
     return tx_to_id(device_id, {"cmd": "play", "index": int(index)})
+
+
+def lantern(command_id, state, lantern_ids=None):
+    """Issue a numbered cue; return {device_id: delivery UUID} for status checks.
+
+    lantern_ids: one ID, an iterable of IDs, or None for all fresh lanterns
+    synced and waiting for this cue. Explicit targets still obey local sync and
+    sequence gates. Call the next cue after telemetry confirms next_command_id.
+    No replay or automatic catch-up occurs for absent lanterns.
+    """
+    if type(command_id) is not int or not 1 <= command_id < 0xffffffff:
+        raise ValueError("Lantern command ID must be 1..4294967294")
+    if state not in LANTERN_STATES:
+        raise ValueError(f"Lantern state must be one of {LANTERN_STATES}")
+    if lantern_ids is None:
+        targets = [sid for sid, rec in snapshot().items() if rec["kind"] == "lantern" and
+                   rec["vals"].get("synced") and rec["vals"].get("next_command_id") == command_id and
+                   device_status(sid)["available"]]
+    else:
+        targets = [lantern_ids] if isinstance(lantern_ids, str) else list(lantern_ids)
+    if any(not _valid_id(sid) for sid in targets):
+        raise ValueError("Invalid lantern device ID")
+    results = {}
+    for sid in dict.fromkeys(targets):
+        rec = get(sid)
+        generation = rec["vals"].get("sync_generation", 0) if rec else 0
+        results[sid] = tx_to_id(sid, {"cmd": "lantern", "state": state, "cue_id": command_id,
+                                     "sync_generation": generation})
+    return results
 
 
 def button_pop(timeout=0.0):
