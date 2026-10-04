@@ -113,16 +113,41 @@ FALLBACK_TO_SYSTEM_DEFAULT = True
 > - A 7.1 device usually exposes 8 output channels indexed 0-7. A 5.1 device usually exposes 6 output channels indexed 0-5. If your table uses indexes 6 or 7, use a device that actually supports those channels.
 > - If using a device with less than 8 channels, you may adjust the table size.
 
-`FALLBACK_TO_SYSTEM_DEFAULT = True` means that if the configured device is invalid or cannot open, the system will try the Windows default output device. Stereo routes remain stereo when the fallback has at least two channels. Mono and broadcast routes are mixed to mono and duplicated across the fallback channels. This is mostly useful for test environments where the real speaker system is not connected.
+`FALLBACK_TO_SYSTEM_DEFAULT = True` means that if the configured device is invalid or cannot open, the system will try the Windows default output device. All fallback playback preserves the original stereo source on outputs 0/1 when available, including requests originally addressed to a mono room or "all". Mono sources feed both sides; a one-channel fallback downmixes both source sides. This is mostly useful for test environments where the real speaker system is not connected.
+
+When the same file is sent to different fallback routes within 0.5 seconds with
+identical gain, loop and shutdown settings, those requests share one playback.
+This avoids doubled volume and delayed copies of the same music on laptop speakers.
+Repeating a request to the same route remains a separate playback. Configured
+show devices retain independent voices on their mapped channels.
+
+Audio stays in float32. Equal sample rates bypass conversion; different rates
+use SoXR VHQ with continuous state across streamed blocks. Conversion applies
+3 dB of fixed headroom to accommodate reconstructed peaks without pumping.
+Install `MainCode/requirements.txt` in each Python environment to get SoXR.
+Diagnostics report `clipped_samples` and underruns; excessive gain or many
+different overlapping sounds can still overload an output.
+
+Optional `PRIMARY_DEVICE_NAME` and `SECONDARY_DEVICE_NAME` settings accept a
+device-name fragment (or `None`). They protect against a saved index pointing
+to another device after unplugging HDMI/USB hardware. The configured output must
+also support every channel index in its table; otherwise fallback is used.
+The template leaves the name settings unset so you can configure your hardware.
+
+Each playback-start log reports the actual device name, index, host API, routed
+output channels, and whether fallback was used. Primary/secondary identify the
+logical routing table, not the physical speaker device.
 
 System startup calls `initialize_audio()` on the main thread before launching
 the GUI and rooms. The streams stay open for subsequent playback. Standalone
 programs can call this helper before creating playback worker threads.
 
 If the Windows default cannot open, fallback tries smaller channel counts and
-other available outputs. If the secondary device fails, it can reuse the open
-primary stream. Check the startup log to confirm the actual output: fallback
-does not preserve discrete room isolation and overlapping copies can clip.
+other available outputs. If the selected fallback device already has an open
+mixer, the system reuses that stream. Secondary fallback also prefers the
+system default over an unrelated primary show device.
+Check the startup log to confirm the actual output: fallback
+does not preserve discrete room isolation.
 With fallback disabled, a failed configured device raises an error.
 
 ### 6.2 Finding Audio Device Indexes

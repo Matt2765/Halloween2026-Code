@@ -3,7 +3,7 @@ import time as t
 import threading
 import multiprocessing
 
-from rooms import Room_1, Room_2, Room_3, Room_4, Room_5
+from rooms import Room_1, Room_2, Room_3, Room_4, Room_5, Room_6, Room_7
 from context import house
 from control.audio_manager import initialize_audio, play_audio
 from control.arduino import connectArduino
@@ -13,7 +13,7 @@ from control.houseLights import toggleHouseLights
 from control import remote_sensor_monitor
 from ui.gui import MainGUI
 from ui.http_server import HTTP_SERVER
-from utils.tools import log_event, BreakCheck
+from utils.tools import log_event, BreakCheck, wait
 from control.doors import spawn_doors
 import control.dimmer_controller as dim
 from control.shutdown import shutdown
@@ -80,13 +80,6 @@ def StartHouse():
         setDoorState(2, "OPEN")
 
         threading.Thread(
-            target=Room_5.run, 
-            args=(), 
-            daemon=True,
-            name=Room_5.__name__.split('.')[-1]
-        ).start()
-
-        threading.Thread(
             target=Room_1.run, 
             args=(), 
             daemon=True, 
@@ -112,6 +105,27 @@ def StartHouse():
             args=(), 
             daemon=True, 
             name=Room_4.__name__.split('.')[-1]
+        ).start()
+
+        threading.Thread(
+            target=Room_5.run,
+            args=(),
+            daemon=True,
+            name=Room_5.__name__.split('.')[-1]
+        ).start()
+
+        threading.Thread(
+            target=Room_6.run,
+            args=(),
+            daemon=True,
+            name=Room_6.__name__.split('.')[-1]
+        ).start()
+
+        threading.Thread(
+            target=Room_7.run,
+            args=(),
+            daemon=True,
+            name=Room_7.__name__.split('.')[-1]
         ).start()
 
         noScareDetector(threaded=True)
@@ -162,10 +176,7 @@ def noScareDetector(threaded=False):
                 if BreakCheck():
                     return
                 
-        for i in range(5):
-            t.sleep(1)
-            if BreakCheck():
-                return
+        wait(5)
             
     if threaded:
         threading.Thread(target=main, daemon=True, name="no scare detector").start()

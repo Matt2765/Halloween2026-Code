@@ -8,7 +8,6 @@ class HouseState:
         self.SOUND = True
         self.testing = False
         self.houseLights = True
-        self.FRthreadRunning = False
         self.remote_sensor_value = None
 
         self.Room_1_state = "INACTIVE"
@@ -16,6 +15,8 @@ class HouseState:
         self.Room_3_state = "INACTIVE"
         self.Room_4_state = "INACTIVE"
         self.Room_5_state = "INACTIVE"
+        self.Room_6_state = "INACTIVE"
+        self.Room_7_state = "INACTIVE"
 
         self.DoorState = {}
         self.TargetDoorState = {}
@@ -23,6 +24,6 @@ class HouseState:
         self.smokeSequence = 1
         self.laserSequence = False
 
-        self.DEBUG_INFO = False
+        self.DEBUG_INFO = True
         self.DEBUG_BREAKCHECK = True
-        self.DISABLE_REMOTE_SENSOR_MONITOR = False # set to true if you want to avoid spam when esp32 disconnected
+        self.DISABLE_REMOTE_SENSOR_MONITOR = True # True disables ESP32 monitoring and its event logs

@@ -2,7 +2,8 @@
 
 Flash this sketch once per board, setting `DEVICE_ID` to `LANTERN1` through
 `LANTERN4`. Set `LIGHT_PIN`, `SYNC_BUTTON_PIN`, output polarity, brightness limit,
-and fade durations in the configuration block. IDs also appear in the GUI list.
+and fade/ramp durations and strobe timing ranges in the configuration block.
+IDs also appear in the GUI list.
 This sketch uses low-speed LEDC PWM, supported by the original ESP32 and ESP32
 variants without high-speed LEDC (including C3/S3). The defaults are configured
 for the **ESP32-C3 Super Mini**: light control on **GPIO4**, sync button on
@@ -39,6 +40,18 @@ strapping pins. GPIO4/5 avoid those functions. See
 * Normal flickering stays between 170 and 255 before the brightness limit.
   Intense flickering uses 12..255 with faster variations. Fade-out variants
   decay over 1800/2800 ms by default and finish at `off`.
+* Entering `flickering_on` or `intense_flickering_on` while the light is dark ramps the
+  flicker brightness up over **1500 ms**. `FLICKER_ON_RAMP_MS` is configurable
+  up to 2000 ms. The check uses current generated PWM brightness, including a
+  fade-out that has already gone dark, rather than requiring the `off` label.
+  `DARK_BRIGHTNESS_THRESHOLD` defaults to zero; raise it if the lamp's driver
+  turns visibly off at a nonzero PWM level. A threshold-triggered ramp starts
+  from the current output level. Already-lit transitions are immediate;
+  switching modes during a ramp preserves its original deadline. Switching
+  from a dark strobe phase also ramps; sync feedback still overlays effects.
+* `strobe` alternates bright flashes (200..255) with fully dark gaps. Randomized
+  30..70 ms on-times and 50..140 ms off-times give it an erratic flicker feel.
+  It starts immediately and continues until another cue or a sync-button reset.
 * Link loss preserves the current effect and sequence. There is no offline
   command buffering or catch-up. Reboot returns to indefinite flickering.
 
@@ -56,13 +69,16 @@ deliveries = RSM.lantern(2, "flicker_out", lantern_ids="LANTERN1")
 # Several specific lanterns:
 deliveries = RSM.lantern(3, "solid_on", lantern_ids=["LANTERN1", "LANTERN2"])
 
+# A jumpscare strobe for all synced lanterns waiting for cue 4:
+deliveries = RSM.lantern(4, "strobe")
+
 for device_id, delivery_id in deliveries.items():
     result = RSM.command_status(delivery_id)  # Poll later; initially queued/pending.
 state = RSM.get_lantern_state("LANTERN1")
 ```
 
 Allowed states: `off`, `solid_on`, `flickering_on`, `intense_flickering_on`,
-`flicker_out`, `intense_flicker_out`. Cue IDs are integers 1..4294967294; they are
+`flicker_out`, `intense_flicker_out`, `strobe`. Cue IDs are integers 1..4294967294; they are
 different from the UUID delivery IDs used by `command_status`. After the last
 possible cue, sync must be reset. An empty group returns `{}`.
 
@@ -97,15 +113,18 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --libraries Esp32/libraries Esp32/t
 On each board, verify boot flicker; short press feedback and wait 1; refusal of
 cue 2 before cue 1; acceptance/advancement of each state; both fades ending off;
 mid-effect reset; long-hold feedback and ignored commands; another short press;
-and four-lantern fan-out. Test reset while a command is in flight, USB disconnect,
+off-to-flicker ramps, immediate already-lit changes, irregular strobing, and
+four-lantern fan-out. Test reset while a command is in flight, USB disconnect,
 and node reboot. Check the GUI at the operator display's DPI scaling. Physical
 PWM, lamp dimming, wireless timing and battery runtime require a hardware test.
 
 Implementation validation: lantern builds pass for original ESP32, ESP32-C3,
 and ESP32-S3 with the installed Espressif Arduino core **3.3.11**. The bridge
 build passes for its original ESP32 target (`esp32:esp32:esp32`).
-Six RSM tests pass (`python -m unittest discover -s MainCode/tests -v`). A local
-native harness exercised the actual sketch's short/long presses, reset generation,
-sequence refusal, both completed fades, timer wraparound and wire compatibility.
-The GUI's status panel ends at y=1019 within the existing 465x1080 window at the
-current Tk scaling (1.33). No firmware was uploaded or tested on physical lamps.
+Seven RSM tests pass (`python -m unittest discover -s MainCode/tests -v`). The
+native harness in `tests/` exercises the actual sketch's short/long presses,
+reset generation, sequence refusal, both completed fades, off-only ramps,
+strobe phases, timer wraparound and wire compatibility.
+The compact GUI status panel ends at y=943 within the existing 465x1080 window
+with the tested device states at Tk scaling 1.33, 1.67 and 2.0. PIR1..PIR5 appear
+in their own column beside TOF and Buttons. No firmware was uploaded or tested on physical lamps.

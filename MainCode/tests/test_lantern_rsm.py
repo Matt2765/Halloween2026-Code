@@ -50,6 +50,15 @@ class LanternRsmTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual([rsm._txq.get_nowait()["sync_generation"] for _ in range(2)], [8, 15])
 
+    def test_strobe_command_and_telemetry(self):
+        record = device("LANTERN1")
+        record["vals"]["lantern_state"] = "strobe"
+        self.assertTrue(rsm._store_device(rsm._shared, record, 10000))
+        self.assertEqual(rsm.get_lantern_state("LANTERN1")["lantern_state"], "strobe")
+        rsm.lantern(1, "strobe", "LANTERN1")
+        request = rsm._txq.get_nowait()
+        self.assertEqual((request["value"], request["duration_ms"]), (6, 1))
+
     def test_old_telemetry_cannot_undo_sync_generation(self):
         self.add("LANTERN1", generation=8)
         old = device("LANTERN1", generation=7)

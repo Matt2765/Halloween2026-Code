@@ -1,16 +1,11 @@
-Installation instructions (Windows PowerShell)
+Windows setup
 
-1. Create and activate a venv (optional but recommended):
+Install Python 3 on the computer, then open this project in VS Code and run
+`MainCode/main.py`. On its first run, the program creates a `.venv` in the
+project folder, installs packages from `MainCode/requirements.txt`, and restarts
+inside that environment. Later runs check the requirements file and repair any
+missing packages automatically.
 
-    python -m venv .venv
-    .\.venv\Scripts\Activate.ps1
-
-2. Upgrade pip and install requirements:
-
-    python -m pip install --upgrade pip
-    python -m pip install -r requirements.txt
-
-Notes:
-- `pydub` requires `ffmpeg` for MP3 support. Download ffmpeg from https://ffmpeg.org/download.html and add its `bin` folder to your PATH.
-- `sounddevice` and `soundfile` may need platform wheels or C libraries. If installation fails, try installing Microsoft Visual C++ Build Tools or use prebuilt wheels from PyPI.
-- If you don't want a virtual environment, you can omit steps 1 and 2a.
+The first run needs an internet connection to download Python packages. `pydub`
+needs FFmpeg on PATH for MP3 handling. The haunt's Arduino, audio, and network
+hardware also need to be connected and configured for that computer.

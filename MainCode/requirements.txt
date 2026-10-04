@@ -3,6 +3,7 @@ pymata4
 numpy
 sounddevice
 soundfile
+soxr>=1.1.0
 
 # Notes:
 # - pydub requires ffmpeg for MP3 handling. Install ffmpeg and add it to PATH.

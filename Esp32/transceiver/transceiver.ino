@@ -119,7 +119,7 @@ Code received(const Received& r) {
       doc["kind"]="sprite"; vals["index"]=b[0]; vals["command_session"]=get32(b+1); vals["command_seq"]=get32(b+5);
       vals["playback_confirmed"]=false; vals["serial_issued"]=true; vals["ready"]=true; break;
     case LANTERN: {
-      const char* states[]={"off","solid_on","flickering_on","intense_flickering_on","flicker_out","intense_flicker_out"};
+      const char* states[]={"off","solid_on","flickering_on","intense_flickering_on","flicker_out","intense_flicker_out","strobe"};
       doc["kind"]="lantern"; vals["lantern_state"]=states[b[0]];
       vals["synced"]=bool(b[1]); vals["brightness"]=b[2];
       vals["next_command_id"]=get32(b+3); vals["sync_generation"]=get32(b+7);
@@ -170,7 +170,7 @@ void usbLine(const char* line) {
   }
   uint16_t value=doc["value"]; uint32_t duration=doc["duration_ms"];
   if((operation!=LANTERN_STATE && duration>30000) || ((operation==MOVE||operation==SET_DEFAULT)&&value>180) || (operation==PLAY&&value>200) ||
-     (operation==LANTERN_STATE && (value>5 || duration<1 || duration==0xffffffff || !doc["sync_generation"].is<uint32_t>()))) {
+     (operation==LANTERN_STATE && (value>LANTERN_STATE_MAX || duration<1 || duration==0xffffffff || !doc["sync_generation"].is<uint32_t>()))) {
     resultLine(cid,id,"rejected","out_of_range"); return;
   }
   if(operation==MOVE||operation==SET_DEFAULT) radio.cancel(id,SUPERSEDED);

@@ -8,48 +8,57 @@ from control import remote_sensor_monitor as rsm
 from control.houseLights import toggleHouseLights
 import threading
 
+# m1Digital_Write(33, 0)
+# setDoorState(1, "OPEN")           # "CLOSED" / "CLOPEN" also supported
+# play_audio("Room_1", "Hit.wav", gain=1)  # threaded=True / looping=True
+# if BreakCheck(): return
+# while not rsm.obstructed("TOF2", block_mm=800, window_ms=250, min_consecutive=2):
+#     if BreakCheck(): return
+#     t.sleep(0.05)
+# log_event("[Room_1] Effect...")
+# toggleHouseLights(True)  # False = OFF
+# threading.Thread(target=function_name, daemon=True, name="Room_1 effect").start()
 
 def run():
     log_event("[Room_1] Starting...")
     house.Room_1_state = "ACTIVE"
 
-    while house.HouseActive or house.Demo:
+    try:
+        # Room startup here
 
-        #m1Digital_Write(33, 0) #torch lights
-        #log_event("[Room_1] +120v Torch Lights ON")
+        while house.HouseActive or house.Demo:
+            if BreakCheck():
+                break
 
-        setDoorState(1, "CLOPEN")
+            # Sequencing here
 
-        play_audio("CabinRoom_Wall", "cabinRoomIntrov10.wav", gain=1)
-        play_audio("CabinRoom_PA", "cabinRoomIntrov10.wav", gain=1)
+            setDoorState(1, "CLOPEN")
 
-        wait(6)
+            play_audio("CabinRoom_Wall", "cabinRoomIntrov10.wav", gain=1)
+            play_audio("CabinRoom_PA", "cabinRoomIntrov10.wav", gain=1)
 
-        rsm.lantern(1, "intense_flickering_on")
+            wait(6)
 
-        wait(28)
+            rsm.lantern(1, "intense_flickering_on")
 
-        rsm.lantern(2, "intense_flicker_out")
+            wait(28)
 
-        wait(16)
+            rsm.lantern(2, "intense_flicker_out")
 
-        rsm.lantern(3, "flickering_on")
+            wait(16)
 
-        #play_audio("Room_1", "splash1.wav", gain=1)
+            rsm.lantern(3, "flickering_on")
 
-        m1Digital_Write(33, 1) #torch lights
-        log_event("[Room_1] +120v Torch Lights OFF")
+            wait(30)
 
-        wait(2)
+            if BreakCheck() or house.Demo:
+                if house.Demo:
+                    house.Demo = False
+                    house.HouseActive = False
+                    toggleHouseLights(True)
+                break
 
-        if BreakCheck() or house.Demo: # end on breakCheck or if demo'ing
-            if house.Demo:
-                house.Demo = False
-                house.HouseActive = False
-            toggleHouseLights(True)
-            return
-
-        t.sleep(0.1)
-
-    house.Room_1_state = "INACTIVE"
-    log_event("[Room_1] Exiting.")
+            t.sleep(0.1)
+    finally:
+        house.Room_1_state = "INACTIVE"
+        log_event("[Room_1] Exiting.")

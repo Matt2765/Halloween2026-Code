@@ -9,21 +9,32 @@ constexpr bool LIGHT_ACTIVE_HIGH = true;
 constexpr uint8_t MAX_BRIGHTNESS = 255;
 constexpr uint32_t DEBOUNCE_MS = 30, LONG_PRESS_MS = 3000;
 constexpr uint32_t FLICKER_OUT_MS = 1800, INTENSE_FLICKER_OUT_MS = 2800;
+constexpr uint32_t FLICKER_ON_RAMP_MS = 1500; // Ramp only when the light is dark.
+constexpr uint8_t DARK_BRIGHTNESS_THRESHOLD = 0; // PWM 0..255; raise if lamp goes dark above zero.
+constexpr uint32_t STROBE_ON_MIN_MS = 30, STROBE_ON_MAX_MS = 70;
+constexpr uint32_t STROBE_OFF_MIN_MS = 50, STROBE_OFF_MAX_MS = 140;
 constexpr uint32_t STATUS_MS = 500;
 // Network, bridge, channel and retries: libraries/HauntProtocol/src/HauntConfig.h
 // ========================================
-enum LightState : uint8_t { OFF, SOLID_ON, FLICKERING_ON, INTENSE_FLICKERING_ON, FLICKER_OUT, INTENSE_FLICKER_OUT };
+enum LightState : uint8_t { OFF, SOLID_ON, FLICKERING_ON, INTENSE_FLICKERING_ON, FLICKER_OUT, INTENSE_FLICKER_OUT, STROBE };
+static_assert(FLICKER_ON_RAMP_MS>0 && FLICKER_ON_RAMP_MS<=2000,"Flicker ramp must take 1..2000 ms");
+static_assert(STROBE_ON_MIN_MS>0 && STROBE_ON_MIN_MS<=STROBE_ON_MAX_MS &&
+              STROBE_OFF_MIN_MS>0 && STROBE_OFF_MIN_MS<=STROBE_OFF_MAX_MS,"Invalid strobe timing range");
 Radio radio;
 Debounced button;
 LightState lightState=FLICKERING_ON;
 bool synced=false, longHandled=false;
-uint8_t brightness=0, flicker=210;
+bool rampingOn=false, strobeLit=false;
+uint8_t brightness=0, outputLevel=0, rampStartLevel=0, flicker=210;
 uint32_t nextCommand=1, generation=0, commandSession=0, commandSequence=0;
 uint32_t stateBegan=0, nextFlicker=0, pressedAt=0, lastStatus=0, lastDiagnostic=0;
+uint32_t rampOnBegan=0;
 uint32_t flashBegan=0, flashStep=0;
 uint8_t flashSteps=0;
+void lightTick(uint32_t now);
 
 void output(uint8_t level) {
+  outputLevel=level;
   brightness=uint16_t(level)*MAX_BRIGHTNESS/255;
   ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,LIGHT_ACTIVE_HIGH?brightness:255-brightness);
   ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0);
@@ -36,6 +47,15 @@ void report() {
   radio.send(p); lastStatus=millis();
 }
 void setState(LightState value,uint32_t now) {
+  bool flickeringOn=value==FLICKERING_ON || value==INTENSE_FLICKERING_ON;
+  if(flickeringOn && !rampingOn && brightness<=DARK_BRIGHTNESS_THRESHOLD) {
+    rampingOn=true; rampOnBegan=now;
+    rampStartLevel=outputLevel;
+  }
+  else if(!flickeringOn) rampingOn=false;
+  // Preserve an in-progress ramp when switching between the two flicker modes.
+  // Output brightness also catches a dark fade/strobe without an OFF label.
+  strobeLit=false;
   lightState=value; stateBegan=now; nextFlicker=now;
 }
 void resetSync(bool enable,uint32_t now) {
@@ -68,8 +88,10 @@ Code command(const Received& r) {
   if(p.type!=COMMAND || p.length!=15 || p.payload[4]!=LANTERN_STATE) return INVALID;
   auto peer=radio.registry.find(p.src); if(peer&&peer->conflict) return CONFLICT;
   uint16_t value=get16(p.payload+5); uint32_t cue=get32(p.payload+7);
-  if(!synced || get32(p.payload+11)!=generation || cue!=nextCommand || cue==0xffffffff || value>5) return INVALID;
-  nextCommand++; setState(LightState(value),millis());
+  if(!synced || get32(p.payload+11)!=generation || cue!=nextCommand || cue==0xffffffff || value>LANTERN_STATE_MAX) return INVALID;
+  uint32_t now=millis();
+  lightTick(now); // Refresh elapsed fades/output before deciding whether it is dark.
+  nextCommand++; setState(LightState(value),now);
   commandSession=p.session; commandSequence=p.seq; report(); return ACCEPTED;
 }
 void lightTick(uint32_t now) {
@@ -78,6 +100,15 @@ void lightTick(uint32_t now) {
   bool intense=lightState==INTENSE_FLICKERING_ON || lightState==INTENSE_FLICKER_OUT;
   bool fading=lightState==FLICKER_OUT || lightState==INTENSE_FLICKER_OUT;
   if(lightState==SOLID_ON) level=255;
+  else if(lightState==STROBE) {
+    if(due(now,nextFlicker)) {
+      strobeLit=!strobeLit;
+      flicker=strobeLit?random(200,256):0;
+      nextFlicker=now+(strobeLit?random(STROBE_ON_MIN_MS,STROBE_ON_MAX_MS+1):
+                                  random(STROBE_OFF_MIN_MS,STROBE_OFF_MAX_MS+1));
+    }
+    level=flicker;
+  }
   else if(lightState!=OFF) {
     if(due(now,nextFlicker)) {
       // Normal flicker always remains visibly lit; intense has brief deep dips.
@@ -91,6 +122,11 @@ void lightTick(uint32_t now) {
       if(elapsed>=duration) { setState(OFF,now); level=0; completed=true; }
       else level=uint32_t(level)*(duration-elapsed)/duration;
     }
+  }
+  if(rampingOn) {
+    uint32_t elapsed=now-rampOnBegan;
+    if(elapsed>=FLICKER_ON_RAMP_MS) rampingOn=false;
+    else level=rampStartLevel+(int(level)-rampStartLevel)*int32_t(elapsed)/int32_t(FLICKER_ON_RAMP_MS);
   }
   // Feedback is an overlay: accepted commands still advance while flashes run.
   if(flashSteps) {

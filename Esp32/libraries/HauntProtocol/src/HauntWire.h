@@ -8,6 +8,7 @@ enum Type : uint8_t { TOF=1, BUTTON=2, PIR=3, SERVO=4, SPRITE=5, COMMAND=6, ACK=
 enum Code : uint8_t { ACCEPTED=0, INVALID=1, SUPERSEDED=2, WRONG_SESSION=3, CONFLICT=4, QUEUE_FULL=5, UNCONFIRMED=6 };
 enum Op : uint8_t { MOVE=1, SET_DEFAULT=2, PLAY=3, NEXT=4, LANTERN_STATE=5 };
 constexpr uint8_t ACK_REQUIRED = 1;
+constexpr uint8_t LANTERN_STATE_MAX = 6; // Existing 0..5 unchanged; 6 = strobe.
 inline bool newer(uint32_t a, uint32_t b) { return int32_t(a-b)>0; }
 inline bool due(uint32_t now, uint32_t at) { return int32_t(now-at)>=0; }
 inline void put16(uint8_t* p, uint16_t v) { p[0]=v; p[1]=v>>8; }
@@ -39,10 +40,10 @@ inline bool shape(const Packet& p) {
     case PIR: return p.length==2 && b[0]<=1 && b[1]<=1;
     case SERVO: return p.length==17 && b[4]<=1 && get16(b)<=180 && get16(b+2)<=180 && (get16(b+15)==0xffff || get16(b+15)<=180);
     case SPRITE: return p.length==9 && b[0]<=200;
-    case LANTERN: return p.length==19 && b[0]<=5 && b[1]<=1 && get32(b+3)>=1;
+    case LANTERN: return p.length==19 && b[0]<=LANTERN_STATE_MAX && b[1]<=1 && get32(b+3)>=1;
     case COMMAND: return p.flags==ACK_REQUIRED && strcmp(p.dst,"*") &&
       ((p.length==11 && b[4]!=LANTERN_STATE) ||
-       (p.length==15 && b[4]==LANTERN_STATE && get16(b+5)<=5 && get32(b+7)>=1 && get32(b+7)<0xffffffff));
+       (p.length==15 && b[4]==LANTERN_STATE && get16(b+5)<=LANTERN_STATE_MAX && get32(b+7)>=1 && get32(b+7)<0xffffffff));
     case ACK: return p.length==9 && !p.flags && b[8]<=UNCONFIRMED && strcmp(p.dst,"*");
     case DIAGNOSTIC: return p.length==24;
     default: return false;

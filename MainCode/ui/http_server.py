@@ -1,11 +1,10 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from MainCode.rooms import Room_1, Room_2, Room_3, Room_4
+from MainCode.rooms import Room_1, Room_2, Room_3, Room_4, Room_5, Room_6, Room_7
 from control.doors import setDoorState
 from control.houseLights import toggleHouseLights
 from utils.tools import log_event
 from context import house
 from ui.gui import demoEvent
-from MainCode.rooms import Room_5
 import threading
 
 HOST = "0.0.0.0"  # Listen on all interfaces
@@ -82,6 +81,8 @@ WEBPAGE = '''<!doctype html>
         <button class="btn-secondary" data-endpoint="/DemoRoom3">Room 3</button>
         <button class="btn-secondary" data-endpoint="/DemoRoom4">Room 4</button>
         <button class="btn-secondary" data-endpoint="/DemoRoom5">Room 5</button>
+        <button class="btn-secondary" data-endpoint="/DemoRoom6">Room 6</button>
+        <button class="btn-secondary" data-endpoint="/DemoRoom7">Room 7</button>
       </div>
       <div class="status"><span class="dot" id="dot-demo"></span><span id="msg-demo" class="small">No actions yet</span></div>
     </section>
@@ -160,6 +161,10 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
             demoEvent(Room_4.__name__.split('.')[-1])
         elif message == "/DemoRoom5":
             demoEvent(Room_5.__name__.split('.')[-1])
+        elif message == "/DemoRoom6":
+            demoEvent(Room_6.__name__.split('.')[-1])
+        elif message == "/DemoRoom7":
+            demoEvent(Room_7.__name__.split('.')[-1])
 
         self.send_response(200)
         self.send_header("Content-type", "text/html")

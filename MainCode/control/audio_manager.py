@@ -15,7 +15,7 @@ import threading
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Mapping, Protocol, TypeAlias, TypedDict, cast
 
@@ -23,6 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 import sounddevice as sd
 import soundfile as sf
+import soxr
 
 from context import house
 from utils.tools import log_event
@@ -37,9 +38,14 @@ from utils.tools import log_event
 PRIMARY_DEVICE_INDEX: int | None = 13  # Primary multichannel output
 SECONDARY_DEVICE_INDEX: int | None = 30  # Secondary multichannel output
 
+# Optional device-name fragments protect against Windows reassigning indexes
+# after a USB/HDMI device is unplugged. None checks only output channel capacity.
+PRIMARY_DEVICE_NAME: str | None = "RX-V673"
+SECONDARY_DEVICE_NAME: str | None = "CUBILUX"
+
 # If a configured device is unavailable, continue through Windows' default
-# output.  That avoids a show-stopping exception, but routes audio to every
-# default-device channel rather than its configured discrete room channel.
+# output. Fallback preserves stereo on outputs 0/1 (or downmixes for a mono
+# device); configured discrete room channel numbers do not apply there.
 FALLBACK_TO_SYSTEM_DEFAULT = True
 
 MULTICH_MIN_CHANNELS = 6
@@ -48,6 +54,10 @@ SHORT_CLIP_CACHE_MAX_BYTES = 256 * 1024 * 1024
 STREAM_READ_FRAMES = 16_384
 STREAM_BUFFER_SECONDS = 3.0
 MIX_BLOCKSIZE = 1_024
+FALLBACK_DUPLICATE_WINDOW_SECONDS = 0.5
+# Reconstructed peaks can exceed the original sample peaks. Fixed attenuation
+# during conversion avoids clipping without dynamic compression or pumping.
+RESAMPLE_HEADROOM_DB = 3.0
 
 # A channel map entry has an output-channel `index` (zero based) and `gain`.
 # For a stereo room, either use `"stereo_<room>": {"index": [L, R], ...}` or
@@ -124,6 +134,7 @@ class _Session:
     def __init__(self, epoch: int, label: str):
         self.epoch = epoch
         self.label = label
+        self.created_at = time.monotonic()
         self.done = threading.Event()
 
 
@@ -173,13 +184,8 @@ def _normalise(x: NDArray[Any]) -> FloatArray:
 def _resample(x: FloatArray, src: int, dst: int) -> FloatArray:
     if src == dst or not len(x):
         return cast(FloatArray, np.asarray(x, np.float32))
-    frames = max(1, round(len(x) * dst / src))
-    positions = np.minimum(np.arange(frames, dtype=float) * src / dst, len(x) - 1)
-    original = np.arange(len(x), dtype=float)
-    return cast(
-        FloatArray,
-        np.column_stack([np.interp(positions, original, x[:, i]) for i in range(x.shape[1])]).astype(np.float32),
-    )
+    return cast(FloatArray, soxr.resample(x, src, dst, quality="VHQ")
+                * np.float32(10 ** (-RESAMPLE_HEADROOM_DB / 20)))
 
 class _CachedSource:
     def __init__(self, data: FloatArray, looping: bool):
@@ -231,6 +237,11 @@ class _StreamedSource:
     def _reader(self) -> None:
         try:
             with sf.SoundFile(str(self.path)) as audio_file:
+                converter = (
+                    soxr.ResampleStream(self.src_fs, self.dst_fs, self.channels,
+                                        dtype="float32", quality="VHQ")
+                    if self.src_fs != self.dst_fs else None
+                )
                 while not self.stop.is_set():
                     with self.lock:
                         full = self.queued >= self.maximum
@@ -242,13 +253,25 @@ class _StreamedSource:
                         if self.looping and audio_file.frames > 0:
                             audio_file.seek(0)
                             continue
+                        if converter is not None:
+                            tail = converter.resample_chunk(
+                                np.empty((0, self.channels), np.float32), last=True)
+                            tail *= np.float32(10 ** (-RESAMPLE_HEADROOM_DB / 20))
+                            with self.lock:
+                                if len(tail):
+                                    self.blocks.append(tail)
+                                    self.queued += len(tail)
                         self.eof.set()
                         self.ready.set()
                         return
-                    block = _resample(_normalise(raw), self.src_fs, self.dst_fs)
+                    block = _normalise(raw)
+                    if converter is not None:
+                        block = converter.resample_chunk(block, last=False)
+                        block *= np.float32(10 ** (-RESAMPLE_HEADROOM_DB / 20))
                     with self.lock:
-                        self.blocks.append(block)
-                        self.queued += len(block)
+                        if len(block):
+                            self.blocks.append(block)
+                            self.queued += len(block)
                         if self.queued >= min(self.dst_fs // 4, self.maximum):
                             self.ready.set()
         except Exception as error:
@@ -287,6 +310,8 @@ class _Voice:
     honor_shutdown: bool
     honor_breakcheck: bool
     stopped: bool = False
+    fallback_key: tuple[str, float, bool, bool, bool] | None = None
+    fallback_routes: set[str] = field(default_factory=set)
 
 class DeviceMixer:
     def __init__(
@@ -312,6 +337,7 @@ class DeviceMixer:
         self.callback_status_count = 0
         self.stream_underruns = 0
         self.peak_voices = 0
+        self.clipped_samples = 0
 
     def start(self) -> None:
         def open_stream(extra_settings: Any | None) -> Any:
@@ -360,14 +386,40 @@ class DeviceMixer:
             f"fs={self.samplerate}, ch={self.channels}"
         )
 
-    def add(self, voice: _Voice) -> None:
+    def add(self, voice: _Voice, *, routed_kind: DeviceKind | None = None) -> _Session:
         with self.lock:
+            for existing in self.voices:
+                if (
+                    voice.fallback_key is not None
+                    and existing.fallback_key == voice.fallback_key
+                    and not existing.stopped
+                    and not existing.fallback_routes.intersection(voice.fallback_routes)
+                    and abs(voice.session.created_at - existing.session.created_at)
+                    <= FALLBACK_DUPLICATE_WINDOW_SECONDS
+                ):
+                    existing.fallback_routes.update(voice.fallback_routes)
+                    voice.source.close()
+                    voice.session.done.set()
+                    with _active_lock:
+                        if voice.session in _active_sessions:
+                            _active_sessions.remove(voice.session)
+                    log_event(
+                        f"[Audio] merged duplicate fallback '{voice.session.label}' "
+                        f"into '{existing.session.label}' on '{self.device_name}' "
+                        f"(idx={self.device_index}); playing one stereo copy"
+                    )
+                    return existing.session
             self.voices.append(voice)
             self.peak_voices = max(self.peak_voices, len(self.voices))
         log_event(
-            f"[Audio] playback started '{voice.session.label}' on {self.kind.upper()}, "
+            f"[Audio] playback started '{voice.session.label}' on "
+            f"'{self.device_name}' (idx={self.device_index}, host={self.hostapi}, "
+            f"{(routed_kind or self.kind).upper()}, "
+            f"fallback={self.fallback_to_all or routed_kind is not None}), "
+            f"outputs={'all' if voice.mode == 'all' else voice.target}, "
             f"active={self.active_voice_count}"
         )
+        return voice.session
 
     @property
     def active_voice_count(self) -> int:
@@ -422,6 +474,7 @@ class DeviceMixer:
             if finished:
                 done.append(voice)
 
+        self.clipped_samples += int(np.count_nonzero(np.abs(output) > 1))
         np.clip(output, -1, 1, out=output)  # Per-block hard safety; no AGC/pumping.
         if done:
             with self.lock:
@@ -439,12 +492,18 @@ class DeviceMixer:
             voices = tuple(self.voices)
         return {
             "device": self.device_index,
+            "device_name": self.device_name,
+            "hostapi": self.hostapi,
+            "fallback": self.fallback_to_all,
             "channels": self.channels,
             "samplerate": self.samplerate,
             "active_voices": len(voices),
             "peak_voices": self.peak_voices,
             "callback_statuses": self.callback_status_count,
             "callback_underruns": self.stream_underruns,
+            "clipped_samples": self.clipped_samples,
+            "resampler": "SoXR VHQ",
+            "resample_headroom_db": RESAMPLE_HEADROOM_DB,
             "stream_buffer_underruns": sum(getattr(v.source, "underruns", 0) for v in voices),
         }
 
@@ -455,20 +514,21 @@ class _FallbackMixerView:
     fallback_to_all = True
 
     def __init__(self, kind: DeviceKind, backing: DeviceMixer) -> None:
-        self.kind = kind
+        self.kind: DeviceKind = kind
         self.backing = backing
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.backing, name)
 
-    def add(self, voice: _Voice) -> None:
-        self.backing.add(voice)
+    def add(self, voice: _Voice) -> _Session:
+        return self.backing.add(voice, routed_kind=self.kind)
 
     def stop_matching(self, predicate: Callable[[_Voice], bool]) -> None:
         self.backing.stop_matching(predicate)
 
     def diagnostics(self) -> dict[str, object]:
         result = self.backing.diagnostics()
+        result["fallback"] = True
         result["fallback_reuses"] = self.backing.kind
         return result
 
@@ -491,11 +551,29 @@ def _fixed(kind: DeviceKind) -> tuple[int, int, int, str, str]:
     if index is None:
         raise RuntimeError(f"{kind.upper()}_DEVICE_INDEX not set or disabled.")
     device = cast(Mapping[str, Any], sd.query_devices(index))
+    name = str(device.get("name", "Unknown"))
+    expected_name = PRIMARY_DEVICE_NAME if kind == "primary" else SECONDARY_DEVICE_NAME
+    if expected_name and expected_name.casefold() not in name.casefold():
+        raise RuntimeError(
+            f"Configured {kind} device idx={index} is '{name}', "
+            f"expected a name containing '{expected_name}' (device indexes may have changed)"
+        )
     channels = int(device["max_output_channels"])
     if channels <= 0:
         raise RuntimeError(f"Configured {kind} device {index} has no output channels")
+    channel_map = primary_channels if kind == "primary" else secondary_channels
+    required_channels = max(
+        (channel for entry in channel_map.values()
+         for channel in ([entry["index"]] if isinstance(entry["index"], int) else entry["index"])),
+        default=-1,
+    ) + 1
+    if channels < required_channels:
+        raise RuntimeError(
+            f"Configured {kind} device idx={index} '{name}' has {channels} output channels; "
+            f"its channel table requires {required_channels}. Device index may have changed."
+        )
     samplerate = int(round(float(device.get("default_samplerate", 48000))))
-    return index, channels, samplerate, _host(index), str(device.get("name", "Unknown"))
+    return index, channels, samplerate, _host(index), name
 
 
 _mixers: dict[DeviceKind, MixerLike] = {}
@@ -546,30 +624,13 @@ def _fallback_channel_counts(max_channels: int) -> list[int]:
 def _make_mixer(kind: DeviceKind) -> MixerLike:
     try:
         index, channels, default_rate, host, name = _fixed(kind)
-        samplerate = 48000 if "wasapi" in host.lower() and channels >= MULTICH_MIN_CHANNELS else default_rate
+        samplerate = default_rate
         mixer = DeviceMixer(kind, index, name, channels, samplerate, host)
         mixer.start()
         return mixer
     except Exception as error:
         if not FALLBACK_TO_SYSTEM_DEFAULT:
             raise RuntimeError(f"Failed to open configured {kind} mixer: {error}") from error
-
-        # If the secondary device is missing, reuse the primary stream instead
-        # of opening the same Windows endpoint a second time. A second stream
-        # can fail when the primary mixer owns a WASAPI-exclusive device.
-        if kind == "secondary":
-            try:
-                primary = _mixer("primary")
-            except Exception as primary_error:
-                log_event(f"[Audio] PRIMARY fallback mixer unavailable: {primary_error}")
-            else:
-                primary_index = getattr(primary, "device_index", "unknown")
-                primary_name = getattr(primary, "device_name", "Primary output")
-                log_event(
-                    f"[Audio] SECONDARY mixer failed ({error}); "
-                    f"reusing PRIMARY idx={primary_index} '{primary_name}'"
-                )
-                return _FallbackMixerView(kind, cast(DeviceMixer, primary))
 
         try:
             _, raw_default_index = cast(tuple[int, int], sd.default.device)
@@ -579,6 +640,17 @@ def _make_mixer(kind: DeviceKind) -> MixerLike:
 
         failures: list[str] = []
         for candidate_index, max_channels, rate, host, name in _fallback_output_candidates(default_index):
+            # Prefer the system default, even when the other show device works.
+            # Reuse its stream only if this fallback candidate is that device.
+            for existing in _mixers.values():
+                backing = existing.backing if isinstance(existing, _FallbackMixerView) else existing
+                if backing.device_index == candidate_index:
+                    log_event(
+                        f"[Audio] {kind.upper()} configured mixer failed ({error}); "
+                        f"using fallback '{backing.device_name}' idx={candidate_index} "
+                        f"by reusing {backing.kind.upper()} stream"
+                    )
+                    return _FallbackMixerView(kind, backing)
             for channels in _fallback_channel_counts(max_channels):
                 mixer = DeviceMixer(kind, candidate_index, name, channels, rate, host, True)
                 try:
@@ -592,7 +664,8 @@ def _make_mixer(kind: DeviceKind) -> MixerLike:
                     continue
                 log_event(
                     f"[Audio] {kind.upper()} configured mixer failed ({error}); "
-                    f"using fallback idx={candidate_index} '{name}', all {channels} channel(s)"
+                    f"using fallback idx={candidate_index} '{name}', "
+                    f"{'stereo on outputs 0/1' if channels >= 2 else 'mono output'}"
                 )
                 return mixer
 
@@ -728,11 +801,10 @@ def _submit(
         kind, mode, target, _ = _resolve_named_target(name)
     mixer = _mixer(kind)
     if mixer.fallback_to_all:
-        # Preserve stereo when the fallback device can reproduce it. Discrete
-        # mono routes still broadcast because their original channel number
-        # has no meaning on a different device.
-        if mode == "stereo" and mixer.channels >= 2:
-            target = [0, 1]
+        # On a fallback device, audition the original stereo recording.
+        # Discrete room maps apply only to the configured show outputs.
+        if mixer.channels >= 2:
+            mode, target = "stereo", [0, 1]
         else:
             mode, target = "all", 0
     elif mode == "stereo":
@@ -753,6 +825,10 @@ def _submit(
         honor_shutdown,
         honor_breakcheck,
     )
+    if mixer.fallback_to_all:
+        voice.fallback_key = (str(path.resolve()), float(gain), looping,
+                              honor_shutdown, honor_breakcheck)
+        voice.fallback_routes = {f"{kind}:{name or 'all'}"}
     # A shutdown can happen while a file is being decoded/buffered.
     with _epoch_lock:
         if honor_shutdown and session.epoch <= _cutoff_epoch:
@@ -761,7 +837,7 @@ def _submit(
             return
         with _active_lock:
             _active_sessions.append(session)
-        mixer.add(voice)
+        session = mixer.add(voice)
     if not threaded:
         session.done.wait()
 

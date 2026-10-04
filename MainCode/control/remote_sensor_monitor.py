@@ -27,11 +27,16 @@ STALE_DEFAULT_MS = 350
 HELD_FRESH_MS = 6000
 DEVICE_FRESH_MS = 6000
 SILENCE_RECONNECT_MS = 3500
+CONNECTION_LOG_INTERVAL_MS = 10000
+# Logging thresholds only; room calls to obstructed() keep their own settings.
+TOF_LOG_BLOCK_MM = 800
+TOF_LOG_CLEAR_MM = 850
+TOF_LOG_MIN_CONSECUTIVE = 2
 PORT_HINTS = ("Silicon Labs", "CP210", "CH340", "USB-SERIAL", "ESP32", "WCH")
 MAX_DEVICES = 64
 MAX_COMMANDS = 128
 LANTERN_STATES = ("off", "solid_on", "flickering_on", "intense_flickering_on",
-                  "flicker_out", "intense_flicker_out")
+                  "flicker_out", "intense_flicker_out", "strobe")
 _manager = _proc = _shared = _txq = _commands = None
 _started = _disabled = False
 _hist = {}
@@ -217,8 +222,62 @@ def _finish_pending(commands, reason):
             commands[cid] = dict(rec, status="unconfirmed", reason=reason, t_host_ms=_now_ms())
 
 
+def _log_event(message):
+    from utils.tools import log_event
+    log_event(f"[RSM] {message}")
+
+
+def _log_device_changes(previous, current, now, tof_events):
+    """Log accepted, fresh telemetry transitions rather than every heartbeat."""
+    sid, kind, vals = current["id"], current["kind"], current["vals"]
+    if current.get("conflict"):
+        return
+    if previous and (previous["session"] != current["session"] or previous.get("conflict")):
+        previous = None
+    if kind == "tof":
+        if now - current["t_host_ms"] > STALE_DEFAULT_MS or not vals["valid"]:
+            tof_events.pop(sid, None)
+            return
+        state = tof_events.get(sid)
+        if not state or state["session"] != current["session"] or now - state["last_ms"] > STALE_DEFAULT_MS:
+            state = {"session": current["session"], "blocked": False, "count": 0}
+        state["last_ms"] = now
+        distance = vals["dist_mm"]
+        state["count"] = state["count"] + 1 if distance < TOF_LOG_BLOCK_MM else 0
+        if state["count"] >= TOF_LOG_MIN_CONSECUTIVE and not state["blocked"]:
+            state["blocked"] = True
+            _log_event(f"{sid} tripped ({distance} mm; threshold {TOF_LOG_BLOCK_MM} mm)")
+        elif distance > TOF_LOG_CLEAR_MM and state["blocked"]:
+            state["blocked"] = False
+            _log_event(f"{sid} cleared ({distance} mm)")
+        tof_events[sid] = state
+    elif kind == "button":
+        index = str(vals["btn"])
+        button = current["buttons"][index]
+        if now - button["t_host_ms"] >= HELD_FRESH_MS:
+            return
+        old = previous.get("buttons", {}).get(index) if previous else None
+        if old and old["pressed"] and now - old["t_host_ms"] >= HELD_FRESH_MS:
+            old = None
+        if (old and old["pressed"] != button["pressed"]) or (old is None and button["pressed"]):
+            _log_event(f"{sid} button {index} {'pressed' if button['pressed'] else 'released'}")
+    elif kind in ("pir", "lantern"):
+        if now - current["t_host_ms"] >= DEVICE_FRESH_MS:
+            return
+        old = previous["vals"] if previous and now - previous["t_host_ms"] < DEVICE_FRESH_MS else {}
+        if kind == "pir":
+            if vals["ready"] and ((old.get("ready") and old.get("output") != vals["output"]) or
+                                  (not old.get("ready") and vals["output"])):
+                _log_event(f"{sid} {'tripped' if vals['output'] else 'cleared'}")
+        elif old.get("lantern_state") != vals["lantern_state"]:
+            _log_event(f"{sid} state: {vals['lantern_state']}")
+
+
 def _monitor_main(shared, commands, txq, port, baud):
     backoff = 0.25
+    last_error_log = None
+    tof_events = {}
+    _log_event(f"Starting monitor on {port or 'auto-detected port'} at {baud} baud")
     while True:
         connection = None
         try:
@@ -242,9 +301,16 @@ def _monitor_main(shared, commands, txq, port, baud):
                         obj = json.loads(line)
                         if not handshake and isinstance(obj, dict) and obj.get("type") not in ("hello", "bridge"):
                             continue  # Drain pre-handshake USB records without refreshing state.
-                        _ingest(shared, commands, obj, _now_ms())
+                        received_at = _now_ms()
+                        previous = shared.get(obj.get("id")) if isinstance(obj, dict) and obj.get("type") == "device" else None
+                        accepted = _ingest(shared, commands, obj, received_at)
+                        if accepted and obj.get("type") == "device":
+                            _log_device_changes(previous, shared[obj["id"]], received_at, tof_events)
                         last_valid = _now_ms()
                         if obj["type"] == "hello" and obj.get("host") == token:
+                            if not handshake:
+                                _log_event(f"Bridge connected on {connection.port}")
+                                last_error_log = None
                             handshake = True
                             bridge_session = obj["session"]
                             shared["_connection"] = {"connected": True, "host": token, "t_host_ms": last_valid}
@@ -280,6 +346,11 @@ def _monitor_main(shared, commands, txq, port, baud):
             shared["_connection"] = {"connected": False}
             shared["_error"] = {"message": str(error), "t_host_ms": _now_ms()}
             _finish_pending(commands, "usb_disconnected")
+            now = _now_ms()
+            if last_error_log is None or now - last_error_log >= CONNECTION_LOG_INTERVAL_MS:
+                _log_event(f"Bridge unavailable: {error}. Retrying connection...")
+                last_error_log = now
+            tof_events.clear()
             if connection:
                 connection.close()
             time.sleep(backoff)
@@ -297,7 +368,10 @@ def init(port=None, baud=DEFAULT_BAUD):
     global _manager, _proc, _shared, _commands, _started, _txq
     from context import house
     set_disabled(house.DISABLE_REMOTE_SENSOR_MONITOR)
-    if _disabled or (_proc and _proc.is_alive()):
+    if _disabled:
+        _log_event("Monitor disabled by house.DISABLE_REMOTE_SENSOR_MONITOR")
+        return
+    if _proc and _proc.is_alive():
         return
     if _manager is None:
         _manager = mp.Manager()
@@ -458,7 +532,7 @@ def tx_to_id(device_id, payload):
         op, value, duration = "play", payload.get("index", payload.get("file")), 0
     else:
         raise ValueError("Supported commands: angle, set_default, play/index/file, next")
-    maximum = 180 if op in ("move", "set_default") else 5 if op == "lantern" else 200
+    maximum = 180 if op in ("move", "set_default") else len(LANTERN_STATES) - 1 if op == "lantern" else 200
     duration_maximum = 0xfffffffe if op == "lantern" else 30000
     if type(value) is not int or not 0 <= value <= maximum or type(duration) is not int or not 0 <= duration <= duration_maximum:
         raise ValueError("Command value or duration out of range")

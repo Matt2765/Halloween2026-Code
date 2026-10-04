@@ -8,40 +8,38 @@ from control import remote_sensor_monitor as rsm
 from control.houseLights import toggleHouseLights
 import threading
 
+# m1Digital_Write(33, 0)
+# setDoorState(1, "OPEN")           # "CLOSED" / "CLOPEN" also supported
+# play_audio("Room_4", "Hit.wav", gain=1)  # threaded=True / looping=True
+# if BreakCheck(): return
+# while not rsm.obstructed("TOF2", block_mm=800, window_ms=250, min_consecutive=2):
+#     if BreakCheck(): return
+#     t.sleep(0.05)
+# log_event("[Room_4] Effect...")
+# toggleHouseLights(True)  # False = OFF
+# threading.Thread(target=function_name, daemon=True, name="Room_4 effect").start()
 
 def run():
     log_event("[Room_4] Starting...")
     house.Room_4_state = "ACTIVE"
 
-    while house.HouseActive or house.Demo:
+    try:
+        # Room startup here
 
-        m1Digital_Write(33, 0) #torch lights
-        log_event("[Room_4] +120v Torch Lights ON")
-
-        setDoorState(1, "CLOPEN")
-
-        while not rsm.obstructed("TOF2", block_mm=800, window_ms=250, min_consecutive=2):
+        while house.HouseActive or house.Demo:
             if BreakCheck():
-                return
-            t.sleep(0.05)
+                break
 
-        play_audio("Room_4", "Hit.wav", gain=1)
+            # Sequencing here
 
-        m1Digital_Write(33, 1) #torch lights
-        log_event("[Room_4] +120v Torch Lights OFF")
+            if BreakCheck() or house.Demo:
+                if house.Demo:
+                    house.Demo = False
+                    house.HouseActive = False
+                    toggleHouseLights(True)
+                break
 
-        wait(10)
-        
-        play_audio("Room_4", "test", gain=1)
-
-        if BreakCheck() or house.Demo: # end on breakCheck or if demo'ing
-            if house.Demo:
-                house.Demo = False
-                house.HouseActive = False
-            toggleHouseLights(True)
-            return
-
-        t.sleep(0.1)
-
-    house.Room_4_state = "INACTIVE"
-    log_event("[Room_4] Exiting.")
+            t.sleep(0.1)
+    finally:
+        house.Room_4_state = "INACTIVE"
+        log_event("[Room_4] Exiting.")
