@@ -25,9 +25,142 @@ class GuiSmokeTests(unittest.TestCase):
         cls.app=QApplication.instance() or QApplication([])
 
     def setUp(self):
+        # Existing UI tests must never contact the real share or upload user queues.
+        sync_patch=patch('hauntsim.cloud_ui.CloudController.sync',return_value=False)
+        sync_patch.start()
+        self.addCleanup(sync_patch.stop)
         self.window=MainWindow()
         self.window.show()
         self.app.processEvents()
+
+    def test_cloud_save_download_and_menu(self):
+        from hauntsim.cloud import CloudStore
+        w=self.window
+        with tempfile.TemporaryDirectory() as folder:
+            w.cloud.store=CloudStore(Path(folder)/'cache.sqlite')
+            w.project.name='Cloud test'
+            w.dirty=True
+            with patch('hauntsim.cloud_ui.QInputDialog.getText',return_value=('My haunt',True)):
+                self.assertTrue(w.save())
+            self.assertFalse(w.dirty)
+            key=w.cloud.active
+            self.assertTrue(w.cloud.store.get(key)['pending'])
+            w.project.name='Edited offline'
+            self.assertTrue(w.save())
+            self.assertEqual(w.cloud.active,key)
+            self.assertEqual(len(w.cloud.store.rows()),1)
+            target=Path(folder)/'download.hauntsim'
+            with patch('hauntsim.cloud_ui.QFileDialog.getSaveFileName',return_value=(str(target),'')):
+                w.cloud.download()
+            self.assertEqual(load(target).name,'Edited offline')
+            self.assertEqual(w.cloud.active,key)
+            cloud=next(a.menu() for a in w.menuBar().actions() if a.text()=='&Cloud')
+            self.assertTrue(any(a.text()=='Cloud projects...' for a in cloud.actions()))
+            w.set_project(Project())
+            self.assertIsNone(w.cloud.active)
+
+    def test_duration_presets_custom_cancel_scenarios_and_reload(self):
+        w=self.window
+        p=example()
+        p.settings.update(duration=123,stop='time')
+        w.set_project(p)
+        self.assertEqual(w.preset.currentIndex(),4)
+        w.preset.setCurrentIndex(1)
+        self.assertEqual(w.effective().settings['duration'],600)
+        self.assertTrue(w.init_engine())
+        self.assertEqual(w.engine.project.settings['duration'],600)
+        self.assertFalse(w.preset.isEnabled())
+        w.reset()
+        with patch('hauntsim.app.edit_values',return_value=None):
+            w.preset.setCurrentIndex(4)
+        self.assertEqual(w.preset.currentIndex(),1)
+        self.assertEqual(w.effective().settings['duration'],600)
+        def custom(parent,title,values):
+            self.assertEqual(values['duration'],123)
+            values.update(duration=321,stop='groups',limit=7)
+            return values
+        with patch('hauntsim.app.edit_values',side_effect=custom):
+            w.preset.setCurrentIndex(4)
+        self.assertEqual(w.effective().settings['duration'],321)
+        self.assertEqual(w.effective().settings['stop'],'groups')
+        w.preset.setCurrentIndex(2)
+        self.assertEqual(w.effective().settings['duration'],1800)
+        self.assertEqual(w.effective().settings['stop'],'time')
+        with patch('hauntsim.app.edit_values',side_effect=lambda parent,title,values:values):
+            w.preset.setCurrentIndex(4)
+        self.assertEqual(w.effective().settings['duration'],321)
+        self.assertEqual(w.effective().settings['stop'],'groups')
+        w.project.scenarios['Short']={'settings':{'duration':600,'stop':'time','duration_preset':'preset'}}
+        w.switch_scenario('Short')
+        self.assertEqual(w.preset.currentIndex(),1)
+        w.switch_scenario('Base')
+        self.assertEqual(w.preset.currentIndex(),4)
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'project.hauntsim'
+            save(w.project,path)
+            w.set_project(load(path))
+        self.assertEqual(w.preset.currentIndex(),4)
+        self.assertEqual(w.project.settings['custom_duration'],321)
+
+    def test_settings_change_and_undo_refresh_duration(self):
+        w=self.window
+        w.set_project(example())
+        def changed(parent,title,values):
+            values['duration']=71
+            return values
+        with patch('hauntsim.app.edit_values',side_effect=changed):
+            w.project_settings()
+        self.assertEqual(w.preset.currentIndex(),4)
+        w.preset.setCurrentIndex(3)
+        self.assertEqual(w.project.settings['duration'],7200)
+        w.undo()
+        self.assertEqual(w.project.settings['duration'],71)
+        self.assertEqual(w.preset.currentIndex(),4)
+
+    def test_advisor_rejects_stale_configuration(self):
+        w=self.window
+        w.set_project(example())
+        source=('Base',w.effective().data())
+        room=next(o for o in w.project.objects if o['kind']=='room')
+        advice={'overrides':{room['id']:{'duration':{'min':15,'typical':15,'max':15}}}}
+        room['duration']['typical']=21
+        with patch.object(w,'notice') as notice:
+            w.apply_advice(advice,source)
+        notice.assert_called_once()
+        self.assertEqual(w.project.scenarios,{})
+
+    def test_visual_time_run_continues_to_horizon_when_idle(self):
+        w=self.window
+        p=example()
+        p.settings.update(duration=300,exterior_groups=1)
+        w.set_project(p)
+        w.run_visual()
+        while w.engine.queue:
+            w.engine.step()
+            if w.engine.stopped:
+                break
+        self.assertLess(w.engine.now,300)
+        w.last_tick=time.monotonic()-.1
+        w.tick()
+        self.assertTrue(w.timer.isActive())
+        w.engine.advance(300)
+        w.tick()
+        self.assertFalse(w.timer.isActive())
+        self.assertEqual(w.last_result['metrics']['duration'],300)
+
+    def test_stopped_visual_run_cannot_resume_or_duplicate_history(self):
+        w=self.window
+        w.set_project(example())
+        self.assertTrue(w.init_engine())
+        w.engine.advance(100)
+        w.stop()
+        count=len(w.project.results)
+        w.stop()
+        self.assertEqual(len(w.project.results),count)
+        with patch.object(w,'notice'):
+            self.assertFalse(w.init_engine())
+        w.reset()
+        self.assertTrue(w.init_engine())
 
     def tearDown(self):
         self.window.dirty=False

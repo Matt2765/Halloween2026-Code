@@ -129,11 +129,16 @@ class Project:
 
     @classmethod
     def from_data(cls, data, background=b''):
-        if data.get('version') != 1:
+        if not isinstance(data,dict):
+            raise ValueError('Project data must be an object')
+        if type(data.get('version')) is not int or data.get('version') != 1:
             raise ValueError(f"Unsupported project version {data.get('version')}; supported: 1")
         result = cls(**deepcopy(data))
         result.background = background
+        check_structure(result)
         result.migrate_legacy_doors()
+        for name in result.scenarios:
+            check_structure(result.scenario(name))
         return result
 
     def migrate_legacy_doors(self):
@@ -170,6 +175,66 @@ class Project:
             if sensor['kind']=='sensor' and objects.get(sensor['path'],{}).get('kind')=='path':
                 sensor['x'],sensor['y']=interpolate(objects[sensor['path']]['points'],sensor['fraction'])
         return result
+
+
+def check_structure(project):
+    """Reject malformed portable data while still allowing unfinished editable layouts."""
+    def finite(value,label):
+        if isinstance(value,float) and not math.isfinite(value):
+            raise ValueError(f'{label}: numbers must be finite')
+        if isinstance(value,dict):
+            for key,item in value.items():
+                finite(item,f'{label}.{key}')
+        elif isinstance(value,list):
+            for item in value:
+                finite(item,label)
+    finite(project.data(),'Project')
+    def fields(value,template,label):
+        if not isinstance(value,dict):
+            raise ValueError(f'{label}: expected an object')
+        for key,default in template.items():
+            if key not in value:
+                raise ValueError(f'{label}: missing {key}')
+            item=value[key]
+            if isinstance(default,bool):
+                valid=isinstance(item,bool)
+            elif isinstance(default,(int,float)):
+                valid=isinstance(item,(int,float)) and not isinstance(item,bool)
+            else:
+                valid=isinstance(item,type(default))
+            if not valid:
+                raise ValueError(f'{label}: invalid {key} type')
+            if isinstance(default,dict):
+                fields(item,default,label+'.'+key)
+    if not isinstance(project.name,str) or not isinstance(project.objects,list) or not isinstance(project.rules,list):
+        raise ValueError('Project name, objects, or rules have invalid types')
+    if not isinstance(project.scenarios,dict) or not isinstance(project.results,list):
+        raise ValueError('Project scenarios or history have invalid types')
+    fields(project.settings,Project().settings,'Run settings')
+    for obj in project.objects:
+        if not isinstance(obj,dict) or obj.get('kind') not in ('room','path','door','sensor','entrance','exit'):
+            raise ValueError('Unknown or malformed layout object')
+        template=new_object(obj['kind'])
+        if obj['kind']=='door':
+            template.pop('path')  # Legacy projects migrate this field after structural checks.
+        fields(obj,template,obj.get('name','Object'))
+        if not obj['id']:
+            raise ValueError('Objects must have nonempty IDs')
+        if obj['kind']=='path':
+            for point in obj['points']:
+                if not isinstance(point,(list,tuple)) or len(point)!=2 or not all(isinstance(v,(int,float)) and not isinstance(v,bool) for v in point):
+                    raise ValueError(f"{obj['name']}: path coordinates must be numeric pairs")
+    rule_template=dict(id='',name='',enabled=True,event='',source='',action='',target='',delay=0.)
+    for rule in project.rules:
+        fields(rule,rule_template,'Rule')
+        fields(rule,{k:v for k,v in dict(condition='always',condition_target='',wait_for_condition=False).items() if k in rule},'Rule')
+        if not rule['id']:
+            raise ValueError('Rules must have nonempty IDs')
+    for name,override in project.scenarios.items():
+        if not isinstance(name,str) or not isinstance(override,dict):
+            raise ValueError('Malformed scenario')
+        if not isinstance(override.get('objects',{}),dict) or not isinstance(override.get('settings',{}),dict) or not isinstance(override.get('rules',[]),list):
+            raise ValueError(f'{name}: malformed scenario overrides')
 
 
 def example():

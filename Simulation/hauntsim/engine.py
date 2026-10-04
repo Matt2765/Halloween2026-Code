@@ -4,9 +4,10 @@ from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
 import heapq
+import math
 import random
 import secrets
-from .model import sample, travel, interpolate, door_path_fraction
+from .model import sample, travel, interpolate, door_path_fraction, length
 from .validation import validate
 
 
@@ -131,6 +132,8 @@ class Engine:
                 self.schedule(rule['delay'],'action',rule['action'],rule['target'],pending['group'])
 
     def release(self):
+        if self.stopped:
+            return
         self.signals += 1
         if self.pending is not None:
             self.coalesced_signals += 1
@@ -289,16 +292,34 @@ class Engine:
             lo,hi=self.now,(g.end if other.state=='blocked' else min(g.end,other.end))
             if hi<=lo or threshold<=0:
                 continue
-            a,b=self.position(g,lo),self.position(other,lo)
-            c,d=self.position(g,hi),self.position(other,hi)
-            delta=(a[0]-b[0],a[1]-b[1])
-            velocity=(c[0]-d[0]-delta[0],c[1]-d[1]-delta[1])
-            norm=sum(v*v for v in velocity)
-            ratio=max(0.,min(1.,-sum(delta[i]*velocity[i] for i in (0,1))/norm)) if norm else 0
-            distance=sum((delta[i]+velocity[i]*ratio)**2 for i in (0,1))**.5
+            # Split at every route corner: velocity is constant only between corners.
+            breaks={lo,hi}
+            for moving,route_obj in ((g,path),(other,route)):
+                if moving.state!='walking' or moving.path_to<=moving.path_from:
+                    continue
+                total=length(route_obj['points'])
+                traversed=0.
+                for a,b in zip(route_obj['points'],route_obj['points'][1:]):
+                    traversed+=math.dist(a,b)
+                    fraction=traversed/total
+                    at=moving.start+(moving.end-moving.start)*(fraction-moving.path_from)/(moving.path_to-moving.path_from)
+                    if lo<at<hi:
+                        breaks.add(at)
+            closest=(float('inf'),lo)
+            ordered=sorted(breaks)
+            for start,end in zip(ordered,ordered[1:]):
+                a,b=self.position(g,start),self.position(other,start)
+                c,d=self.position(g,end),self.position(other,end)
+                delta=(a[0]-b[0],a[1]-b[1])
+                velocity=(c[0]-d[0]-delta[0],c[1]-d[1]-delta[1])
+                norm=sum(v*v for v in velocity)
+                ratio=max(0.,min(1.,-sum(delta[i]*velocity[i] for i in (0,1))/norm)) if norm else 0
+                distance=sum((delta[i]+velocity[i]*ratio)**2 for i in (0,1))**.5
+                closest=min(closest,(distance,start+(end-start)*ratio))
+            distance,at=closest
             if distance<threshold:
                 self.spacing.append(dict(group=g.id,other=other.id,location=path['id'],
-                    time=lo+(hi-lo)*ratio,distance=distance))
+                    time=at,distance=distance))
                 self.emit('spacing_conflict',path['id'],g.id,f'Predicted proximity to group {other.id}: {distance:.2f} pixels')
 
     def block(self, g, cause, room=False):
@@ -328,7 +349,7 @@ class Engine:
                 return False
             g.chosen = path['id']
         path = self.objects[g.chosen]
-        if self.paths[path['id']]:
+        if not path['enabled'] or self.paths[path['id']]:
             self.block(g, path['id'], True)
             return False
         self.clear_block(g)
@@ -385,7 +406,17 @@ class Engine:
         self.admit()
 
     def step(self):
-        if self.stopped or not self.queue:
+        if self.stopped:
+            return False
+        settings=self.project.settings
+        if not self.queue:
+            if settings['stop']=='time':
+                self.now=settings['duration']
+                self.stopped,self.reason=True,'Duration reached (no pending events)'
+            return False
+        if settings['stop']=='time' and self.queue[0][0]>settings['duration']:
+            self.now=settings['duration']
+            self.stopped,self.reason=True,'Duration reached'
             return False
         at, _, kind, args = heapq.heappop(self.queue)
         self.now = at
@@ -446,12 +477,19 @@ class Engine:
         return True
 
     def advance(self, until, budget=20000):
+        if not math.isfinite(until) or until<self.now:
+            raise ValueError('Simulation time must be finite and cannot move backwards')
+        settings=self.project.settings
+        if settings['stop']=='time':
+            until=min(until,settings['duration'])
         count = 0
         while self.queue and self.queue[0][0] <= until and not self.stopped and count < budget:
             self.step()
             count += 1
         if count < budget and not self.stopped:
             self.now = until
+            if settings['stop']=='time' and self.now>=settings['duration']:
+                self.stopped,self.reason=True,'Duration reached'
         if count == budget and self.queue and self.queue[0][0] <= self.now:
             raise ValueError('Runaway simultaneous events: inspect signal cycles / zero durations')
         return count
@@ -481,6 +519,7 @@ class Engine:
                 self.now = horizon
         else:
             self.reason = self.reason or 'Duration reached'
+        self.stopped=True
         return self
 
     def position(self, g, at=None):

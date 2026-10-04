@@ -1,10 +1,14 @@
 """Preflight validation shared by GUI and headless runners."""
 import math
-from .model import EVENTS, ACTIONS, CONDITIONS, length
+from .model import EVENTS, ACTIONS, CONDITIONS, length, check_structure
 
 
 def validate(p):
     errors, warnings = [], []
+    try:
+        check_structure(p)
+    except (ValueError,TypeError,KeyError,AttributeError) as exc:
+        return [str(exc)],warnings
     objects = p.by_id()
     ids = [o['id'] for o in p.objects] + [r['id'] for r in p.rules]
     if len(ids) != len(set(ids)):
@@ -30,23 +34,36 @@ def validate(p):
     check_range(p.settings['speed'], 'Walking speed', True)
     if p.settings['duration'] <= 0 or p.settings['limit'] <= 0:
         errors.append('Run duration and completion limit must be positive')
+    if p.settings['stop'] not in ('time','groups','guests','manual'):
+        errors.append('Unknown run stop condition')
+    for key in ('limit','exterior_groups','seed'):
+        if p.settings[key]<0 or int(p.settings[key])!=p.settings[key]:
+            errors.append(f'{key}: must be a nonnegative integer')
+    if p.settings['pixels_per_unit']<0:
+        errors.append('Scale cannot be negative')
     for o in enabled:
         k, label = o['kind'], o['name']
         if k == 'room':
             check_range(o['duration'], label)
-            if o['capacity'] < 1 or not 0 <= o['acceptable_min'] <= o['preferred'] <= o['acceptable_max']:
+            if o['capacity'] < 1 or int(o['capacity'])!=o['capacity'] or not 0 <= o['acceptable_min'] <= o['preferred'] <= o['acceptable_max']:
                 errors.append(f'{label}: invalid capacity or acceptable timing bounds')
+            if min(o['width'],o['height'])<=0:
+                errors.append(f'{label}: room dimensions must be positive')
         elif k == 'path':
             if o['source'] not in graph or o['target'] not in graph:
                 errors.append(f'{label}: connect both ends to enabled rooms/entrance/exit')
             else:
                 graph[o['source']].append(o['target'])
+                if objects[o['source']]['kind'] not in ('entrance','room') or objects[o['target']]['kind'] not in ('room','exit'):
+                    errors.append(f'{label}: routes must lead from entrance/room to room/exit')
             if len(o['points']) < 2 or length(o['points']) <= 0:
                 errors.append(f'{label}: path needs two distinct points')
             if o['seconds'] <= 0 and p.settings['pixels_per_unit'] <= 0:
                 errors.append(f'{label}: set a travel-time override or calibrate scale')
             if o['weight'] <= 0:
                 errors.append(f'{label}: branch weight must be positive')
+            if o['seconds']<0 or o['spacing']<0:
+                errors.append(f'{label}: travel time and spacing cannot be negative')
         elif k == 'sensor':
             if o['path'] not in objects or objects[o['path']]['kind'] != 'path':
                 errors.append(f'{label}: sensor must reference a path')
@@ -55,6 +72,8 @@ def validate(p):
         elif k == 'door':
             if min(o['opening'], o['closing'], o['hold']) < 0:
                 errors.append(f'{label}: door durations cannot be negative')
+            if o['style'] not in ('swing','slide','passage') or o['width']<=0:
+                errors.append(f'{label}: invalid door style/width')
             if not o.get('path'):
                 warnings.append(f'{label}: door is not connected to a path')
             elif o['path'] not in objects or objects[o['path']]['kind']!='path':

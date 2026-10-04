@@ -2,6 +2,8 @@
 from collections import Counter
 from datetime import datetime, timezone
 from statistics import mean, median
+from copy import deepcopy
+import math
 import csv
 import json
 
@@ -64,9 +66,11 @@ def summarize(e, scenario='Base'):
     for minutes in (5,10,15,30):
         width = minutes*60
         buckets = []
-        for start in range(0, max(1,int(e.now)+1), width):
-            rows = [g for g in done if start <= g.completed < start+width]
-            buckets.append(dict(start=start, groups=len(rows), guests=sum(g.guests for g in rows)))
+        for start in range(0, max(width,math.ceil(e.now/width)*width), width):
+            end=min(start+width,e.now)
+            rows = [g for g in done if start <= g.completed and
+                    (g.completed<end or (end==e.now and g.completed==end))]
+            buckets.append(dict(start=start,end=end,groups=len(rows), guests=sum(g.guests for g in rows)))
         windows[str(minutes)] = buckets
     if e.blocked_signals:
         explanations.append(f'{e.blocked_signals} release signals were entrance-constrained; '
@@ -77,13 +81,17 @@ def summarize(e, scenario='Base'):
             total = sum(v['duration'] for v in failures if (v['location'],v['cause'])==(location,cause))
             explanations.append(f"{e.objects.get(location,{}).get('name',location)}: {count} flow failures, {total:.1f}s blocked by "
                                 f"{e.objects.get(cause,{}).get('name',cause)}.")
-    return dict(project=e.project.name, scenario=scenario, timestamp=datetime.now(timezone.utc).isoformat(),
+    series=list(e.series)
+    endpoint=[e.now,metrics['current_groups'],metrics['current_guests'],len(done),guests]
+    if not series or series[-1]!=endpoint:
+        series.append(endpoint)
+    return deepcopy(dict(project=e.project.name, scenario=scenario, timestamp=datetime.now(timezone.utc).isoformat(),
         seed=e.seed, settings=e.project.settings, configuration=e.project.data() | {'results': [], 'scenarios': {}},
         metrics=metrics, rooms=rooms, failures=failures, overstays=overstays, spacing=spacing,
         doors={did: dict(cycles=e.door_cycles[did], utilization=(d['active']+(e.now-d['start'] if d['state']!='closed' else 0))/duration)
                for did,d in e.doors.items()}, sensors=dict(e.sensor_counts), windows=windows,
-        latencies=e.latencies, paths=e.path_visits, series=e.series,
-        explanations=explanations, termination=e.reason)
+        latencies=e.latencies, paths=e.path_visits, series=series,
+        explanations=explanations, termination=e.reason))
 
 
 def compact(result):

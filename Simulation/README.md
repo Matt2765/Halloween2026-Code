@@ -33,7 +33,7 @@ The only third-party dependency is **PySide6** (Qt widgets, graphics, threads). 
 6. Select **Path**. Click from the entrance through route vertices to the first room; double-click or press Enter to finish. Draw one directed path for every connection, such as Entrance → A → B → C → Exit. Arrowheads show direction. Endpoints near node centers are connected automatically; verify **Source** and **Target** in properties. A connection may have arbitrarily many vertices.
 7. Path **Travel override** defaults to 5 seconds. Set it to **0** to use calibrated distance / sampled group speed. Each group keeps its sampled speed throughout the visit. Branching is supported: draw multiple outgoing paths and set positive relative branch weights. Routes are sampled once per departure and retained while blocked.
 8. Place doors and sensors, then add admission rules as described below.
-9. Choose **Project → Validate**, resolve errors, then save a `.hauntsim` file.
+9. Choose **Project → Validate**, resolve errors, then press **Ctrl+S** to name and save your cloud project.
 
 **Help → Open example project** provides a three-room layout with a sensor admission rule and an automatic swinging door. The same portable project is in `examples/three-scenes.hauntsim`. Its automatic interior door deliberately causes short flow failures until you configure advance opening.
 
@@ -142,3 +142,30 @@ Tests cover persistence/version handling and legacy door migration, interrupted 
 ## Modeling limits
 
 Rooms are rectangles; paths are editable polylines. Guests are not individually simulated, and there is no collision inference from background images. Path segments are exclusive to one group, so choose segment boundaries deliberately; this is a conservative flow model, not pedestrian fluid dynamics. Sensor direction follows directed paths. Door thresholds use the closed leaf's line intersection, but crossing has no separately simulated group body length. Branch selection is weighted stochastic routing, not conditional per-group itineraries. The advisor optimizes room timings, not layout geometry, door timing or rule topology. Large visual scenes and extremely long/high-volume runs remain bounded by memory and a two-million-event analytical safety limit. No packaged Windows installer is supplied; launch from Python.
+
+
+## Cloud projects and offline work
+
+Both Halloween2026 and HalloweenTemplate connect to the configured Nextcloud folder.
+
+- **File > Save / Ctrl+S** saves locally immediately and uploads in the background. The first save asks for a project name. Subsequent saves update that cloud project.
+- **Cloud > Cloud projects / Ctrl+Shift+O** lists projects with their dates and offline/upload status. Select a project and click **Open project**. Opening checks the server for its latest saved version; if unavailable, it opens the cached copy.
+- **Refresh / sync** checks the server immediately. The app also syncs at startup and retries every 30 seconds while open. Wait for **Cloud up to date** before switching machines.
+- **File > Save a cloud copy / Ctrl+Shift+S** creates a separate cloud project.
+- **File > Download project file** exports a portable `.hauntsim` copy, including the floor-plan image. This does not change the active cloud project or mark unsaved edits as saved to the cloud.
+- **File > Open project** imports an existing local `.hauntsim` file. Its next Save creates a cloud project; the original local file is retained.
+
+After the first successful sync, projects are cached on that machine and can be opened offline. Saved offline changes remain queued after closing the app and upload when the app is running and the connection returns. Unsaved edits still use the normal save/discard/cancel prompt. This is sync-on-save, not automatic saving of every edit or simultaneous live collaboration.
+
+An open project is not silently replaced by another machine's edits. Reopen it from Cloud projects to retrieve the latest version. If two machines save changes based on the same earlier version, the later upload becomes a clearly named conflict copy. Both versions remain available in the browser; the editing session follows its conflict copy.
+
+The local cache and durable upload queue live under `%LOCALAPPDATA%/HauntSim/cloud/`, separately for each installation. Keep this cache when work is pending upload. Files removed on the server remain recoverable in the local cache; saving one preserves it as a conflict copy rather than silently recreating or replacing a remote file. The app does not delete server projects.
+
+
+## Duration selection and audit
+
+The duration dropdown and run settings stay synchronized when opening projects, changing scenarios, editing settings, and using undo. A preset runs for the displayed duration and stops on time. Custom restores the custom duration, stop condition, and completion target in the settings window. Choosing a preset preserves custom settings. Cancel leaves the previous selection active. The dropdown is disabled during a run or analysis; Reset/Edit unlocks it after a visual run.
+
+Final throughput intervals include completions exactly at the run endpoint. Repeated-run percentiles use linear interpolation. A cloud status message identifies newer remote saves without replacing an open project. Invalid remote project files are reported while other valid projects remain available.
+
+See [AUDIT.md](AUDIT.md) for the October 4, 2026 findings, corrections, independent numerical checks, test coverage, and the model's accuracy limits.

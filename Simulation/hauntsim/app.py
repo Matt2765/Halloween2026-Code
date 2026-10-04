@@ -20,6 +20,7 @@ from .editor import LayoutView
 from .forms import Form, edit_values
 from .reports import Reports, table
 from .workers import Worker
+from .cloud_ui import CloudController
 
 
 class MainWindow(QMainWindow):
@@ -59,6 +60,7 @@ class MainWindow(QMainWindow):
         self.build_docks()
         self.build_menus()
         self.build_controls()
+        self.cloud=CloudController(self)
         self.refresh()
         self.resizeDocks([self.inspector_dock,self.rules_dock],[580,220],Qt.Vertical)
         geometry=self.settings.value('geometry')
@@ -83,7 +85,13 @@ class MainWindow(QMainWindow):
         self.action(file,'New project',self.new,'Ctrl+N')
         self.action(file,'Open project…',self.open,'Ctrl+O')
         self.action(file,'Save',self.save,'Ctrl+S')
-        self.action(file,'Save as…',lambda:self.save(True),'Ctrl+Shift+S')
+        self.action(file,'Save a cloud copy...',lambda:self.save(True),'Ctrl+Shift+S')
+        self.action(file,'Download project file...',lambda:self.cloud.download())
+        cloud=bar.addMenu('&Cloud')
+        self.action(cloud,'Cloud projects...',lambda:self.cloud.browse(),'Ctrl+Shift+O')
+        self.action(cloud,'Sync now',lambda:self.cloud.sync())
+        self.action(cloud,'Save to cloud',self.save)
+        self.action(cloud,'Download project file...',lambda:self.cloud.download())
         self.recent_menu=file.addMenu('Recent projects')
         self.refresh_recent()
         self.action(file,'Close project',self.new)
@@ -269,10 +277,15 @@ class MainWindow(QMainWindow):
         self.scenario_combo.addItems(['Base']+list(self.project.scenarios))
         self.scenario_combo.setCurrentText(self.active)
         self.scenario_combo.blockSignals(False)
+        self.refresh_duration()
         self.update_title()
 
     def update_title(self):
         name=Path(self.filename).name if self.filename else self.project.name
+        if hasattr(self,'cloud') and self.cloud.active:
+            row=self.cloud.store.get(self.cloud.active)
+            if row:
+                name=row['name']
         self.setWindowTitle(f"{'* ' if self.dirty else ''}{name} — HauntSim")
 
     def inspect(self,oid):
@@ -457,28 +470,56 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 self.error(exc)
 
-    def project_settings(self):
+    def refresh_duration(self):
+        settings=self.effective().settings
+        durations=[3600,600,1800,7200]
+        index=4
+        if settings['stop']=='time' and settings.get('duration_preset')!='custom':
+            if settings['duration'] in durations:
+                index=durations.index(settings['duration'])
+        self.preset.blockSignals(True)
+        self.preset.setCurrentIndex(index)
+        self.preset.blockSignals(False)
+        self.preset.setEnabled(not self.engine and not self.worker)
+
+    def project_settings(self,custom=False):
         if not self.can_edit():
             return
-        values=edit_values(self,'Project and run settings',dict(name=self.project.name,**self.effective().settings))
+        settings=self.effective().settings
+        metadata=('duration_preset','custom_duration','custom_stop','custom_limit')
+        initial=dict(name=self.project.name,**{k:v for k,v in settings.items() if k not in metadata})
+        if custom:
+            for key in ('duration','stop','limit'):
+                initial[key]=settings.get('custom_'+key,settings[key])
+        values=edit_values(self,'Project and run settings',initial)
         if values:
             self.checkpoint()
             self.project.name=values.pop('name')
+            values.update(duration_preset='custom',custom_duration=values['duration'],
+                          custom_stop=values['stop'],custom_limit=values['limit'])
             if self.active=='Base':
                 self.project.settings=values
             else:
                 self.project.scenarios[self.active]['settings']=values
             self.refresh()
+        else:
+            self.refresh_duration()
 
     def set_duration(self,index):
         if self.engine or self.worker:
+            self.refresh_duration()
             return
         if index==4:
-            self.project_settings()
+            self.project_settings(custom=True)
             return
+        if index not in range(4):
+            return
+        settings=self.effective().settings
         self.checkpoint()
         target=self.project.settings if self.active=='Base' else self.project.scenarios[self.active].setdefault('settings',{})
-        target.update(duration=[3600,600,1800,7200][index],stop='time')
+        if settings.get('duration_preset')=='custom' or settings['stop']!='time' or settings['duration'] not in (3600,600,1800,7200):
+            target.update(custom_duration=settings['duration'],custom_stop=settings['stop'],custom_limit=settings['limit'])
+        target.update(duration=[3600,600,1800,7200][index],stop='time',duration_preset='preset')
         self.refresh()
 
     def set_rules(self,rules):
@@ -581,6 +622,9 @@ class MainWindow(QMainWindow):
         if self.worker:
             return False
         if self.engine:
+            if self.engine.stopped:
+                self.notice('Use Reset / Edit to start a new run.')
+                return False
             return True
         if not self.preflight():
             return False
@@ -613,7 +657,7 @@ class MainWindow(QMainWindow):
             self.render_status()
             if self.engine.stopped or (settings['stop']=='time' and self.engine.now>=settings['duration']):
                 self.stop()
-            elif not self.engine.queue:
+            elif not self.engine.queue and settings['stop']!='time':
                 self.pause()
                 self.statusBar().showMessage('No pending events. Release manually, inspect rules, or Stop to collect results.')
         except Exception as exc:
@@ -626,6 +670,8 @@ class MainWindow(QMainWindow):
             try:
                 self.engine.step()
                 self.render_status()
+                if self.engine.stopped:
+                    self.stop()
             except Exception as exc:
                 self.error(exc)
 
@@ -652,8 +698,11 @@ class MainWindow(QMainWindow):
     def stop(self):
         self.pause()
         if self.engine:
+            self.engine.stopped=True
             self.engine.reason=self.engine.reason or 'Stopped at visual run boundary'
-            self.accept_result(summarize(self.engine,self.active))
+            if not getattr(self.engine,'result_collected',False):
+                self.accept_result(summarize(self.engine,self.active))
+                self.engine.result_collected=True
 
     def reset(self):
         if self.worker:
@@ -763,10 +812,12 @@ class MainWindow(QMainWindow):
         if self.worker or not self.preflight():
             return
         p=self.analysis_project()
+        self.advice_source=(self.active,self.effective().data())
         self.start_job(lambda c,progress:advise(p,c,progress),self.advice_result)
 
     def advice_result(self,result):
         self.advice=result
+        source=self.advice_source
         objects=self.effective().by_id()
         rows=[[objects[oid]['name'],objects[oid]['duration']['typical'],v['duration']['typical']]
               for oid,v in result['overrides'].items()]
@@ -780,22 +831,31 @@ class MainWindow(QMainWindow):
             keys=['guests_per_hour','groups_per_hour','interior_failures','overstay_seconds','traversal_average']
             layout.addWidget(table(['Metric','Current','Suggested'],[[k,result['baseline'][k],result['suggested'][k]] for k in keys]))
         button=QPushButton('Save recommendation as a new scenario')
-        button.clicked.connect(self.apply_advice)
+        button.clicked.connect(lambda checked=False,r=result,s=source:self.apply_advice(r,s))
         layout.addWidget(button)
         self.reports.addTab(page,'Timing advisor')
         self.reports.setCurrentWidget(page)
         self.tabs.setCurrentIndex(1)
 
-    def apply_advice(self):
+    def apply_advice(self,advice=None,source=None):
         if not self.can_edit():
             return
+        advice=advice or self.advice
+        source=source or self.advice_source
+        current=self.effective().data()
+        expected=deepcopy(source[1])
+        # Stored reports do not affect recommendations; configuration edits do.
+        for data in (current,expected):
+            data['results']=[]
+        if source[0]!=self.active or current!=expected:
+            return self.notice('The project or scenario changed after this advice was calculated. Run the timing advisor again before applying it.')
         name='Advisor '+str(len(self.project.scenarios)+1)
         while name in self.project.scenarios:
             name+=' copy'
         self.checkpoint()
         scenario=deepcopy(self.project.scenarios.get(self.active,{}))
         overrides=scenario.setdefault('objects',{})
-        for oid,values in self.advice['overrides'].items():
+        for oid,values in advice['overrides'].items():
             overrides.setdefault(oid,{}).update(values)
         self.project.scenarios[name]=scenario
         self.active=name
@@ -871,6 +931,7 @@ class MainWindow(QMainWindow):
         return answer==QMessageBox.Discard
 
     def set_project(self,project,filename=''):
+        self.cloud.active=None
         self.reset()
         self.project=project
         self.filename=filename
@@ -912,23 +973,7 @@ class MainWindow(QMainWindow):
 
     def save(self,save_as=False):
         self.property_edit_key=None
-        filename=self.filename
-        if save_as or not filename:
-            filename,_=QFileDialog.getSaveFileName(self,'Save project',filename or self.project.name+'.hauntsim','HauntSim (*.hauntsim)')
-        if not filename:
-            return False
-        if not filename.lower().endswith('.hauntsim'):
-            filename+='.hauntsim'
-        try:
-            save(self.project,filename)
-            self.filename=filename
-            self.dirty=False
-            self.add_recent(filename)
-            self.update_title()
-            return True
-        except Exception as exc:
-            self.error(exc)
-            return False
+        return self.cloud.save(copy=save_as)
 
     def add_recent(self,filename):
         paths=self.settings.value('recent',[],type=list)
@@ -952,6 +997,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self,event):
         if self.confirm_unsaved():
             self.timer.stop()
+            self.cloud.stop()
             self.settings.setValue('geometry',self.saveGeometry())
             event.accept()
         else:

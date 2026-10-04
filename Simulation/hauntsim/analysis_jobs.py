@@ -2,13 +2,20 @@
 from copy import deepcopy
 from collections import Counter
 from statistics import mean, median
+import math
 from .engine import Engine
 from .analytics import summarize
 
 
 def percentile(values, q):
     values = sorted(values)
-    return values[min(len(values)-1, int((len(values)-1)*q))] if values else 0
+    if not 0<=q<=1:
+        raise ValueError('Percentile must be between zero and one')
+    if not values:
+        return 0
+    at=(len(values)-1)*q
+    low,high=math.floor(at),math.ceil(at)
+    return values[low]+(values[high]-values[low])*(at-low)
 
 
 def repeated(project, count, cancel=lambda:False, progress=lambda n,t:None):
