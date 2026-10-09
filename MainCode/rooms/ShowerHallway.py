@@ -10,18 +10,18 @@ import threading
 
 # m1Digital_Write(33, 0)
 # setDoorState(1, "OPEN")           # "CLOSED" / "CLOPEN" also supported
-# play_audio("Room_6", "Hit.wav", gain=1)  # threaded=True / looping=True
+# play_audio("ShowerHallway", "Hit.wav", gain=1)  # threaded=True / looping=True
 # if BreakCheck(): return
 # while not rsm.obstructed("TOF2", block_mm=800, window_ms=250, min_consecutive=2):
 #     if BreakCheck(): return
 #     t.sleep(0.05)
-# log_event("[Room_6] Effect...")
+# log_event("[ShowerHallway] Effect...")
 # toggleHouseLights(True)  # False = OFF
-# threading.Thread(target=function_name, daemon=True, name="Room_6 effect").start()
+# threading.Thread(target=function_name, daemon=True, name="ShowerHallway effect").start()
 
 def run():
-    log_event("[Room_6] Starting...")
-    house.Room_6_state = "ACTIVE"
+    log_event("[ShowerHallway] Starting...")
+    house.ShowerHallway_state = "ACTIVE"
 
     try:
         # Room startup here
@@ -41,5 +41,5 @@ def run():
 
             t.sleep(0.1)
     finally:
-        house.Room_6_state = "INACTIVE"
-        log_event("[Room_6] Exiting.")
+        house.ShowerHallway_state = "INACTIVE"
+        log_event("[ShowerHallway] Exiting.")

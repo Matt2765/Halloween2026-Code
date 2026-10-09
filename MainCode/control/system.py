@@ -3,7 +3,7 @@ import time as t
 import threading
 import multiprocessing
 
-from rooms import Room_1, Room_2, Room_3, Room_4, Room_5, Room_6, Room_7
+from rooms import CabinRoom, Bathroom, ShowerHallway, DynamicHallway, Basement, PalletHallway, ForestHallway
 from context import house
 from control.audio_manager import initialize_audio, play_audio
 from control.arduino import connectArduino
@@ -80,52 +80,52 @@ def StartHouse():
         setDoorState(2, "OPEN")
 
         threading.Thread(
-            target=Room_1.run, 
+            target=CabinRoom.run, 
             args=(), 
             daemon=True, 
-            name=Room_1.__name__.split('.')[-1]
+            name=CabinRoom.__name__.split('.')[-1]
         ).start()
         
         threading.Thread(
-            target=Room_2.run, 
+            target=Bathroom.run, 
             args=(), 
             daemon=True, 
-            name=Room_2.__name__.split('.')[-1]
+            name=Bathroom.__name__.split('.')[-1]
         ).start()
         
         threading.Thread(
-            target=Room_3.run, 
+            target=ShowerHallway.run, 
             args=(), 
             daemon=True, 
-            name=Room_3.__name__.split('.')[-1]
+            name=ShowerHallway.__name__.split('.')[-1]
         ).start()
         
         threading.Thread(
-            target=Room_4.run, 
+            target=DynamicHallway.run, 
             args=(), 
             daemon=True, 
-            name=Room_4.__name__.split('.')[-1]
+            name=DynamicHallway.__name__.split('.')[-1]
         ).start()
 
         threading.Thread(
-            target=Room_5.run,
+            target=Basement.run,
             args=(),
             daemon=True,
-            name=Room_5.__name__.split('.')[-1]
+            name=Basement.__name__.split('.')[-1]
         ).start()
 
         threading.Thread(
-            target=Room_6.run,
+            target=PalletHallway.run,
             args=(),
             daemon=True,
-            name=Room_6.__name__.split('.')[-1]
+            name=PalletHallway.__name__.split('.')[-1]
         ).start()
 
         threading.Thread(
-            target=Room_7.run,
+            target=ForestHallway.run,
             args=(),
             daemon=True,
-            name=Room_7.__name__.split('.')[-1]
+            name=ForestHallway.__name__.split('.')[-1]
         ).start()
 
         noScareDetector(threaded=True)

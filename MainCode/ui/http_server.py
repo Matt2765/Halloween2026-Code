@@ -1,5 +1,5 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from MainCode.rooms import Room_1, Room_2, Room_3, Room_4, Room_5, Room_6, Room_7
+from MainCode.rooms import CabinRoom, Bathroom, ShowerHallway, DynamicHallway, Basement, PalletHallway, ForestHallway
 from control.doors import setDoorState
 from control.houseLights import toggleHouseLights
 from utils.tools import log_event
@@ -76,13 +76,13 @@ WEBPAGE = '''<!doctype html>
     <section class="section">
       <h2>Demo Controls</h2>
       <div class="row">
-        <button class="btn-secondary" data-endpoint="/DemoRoom1">Room 1</button>
-        <button class="btn-secondary" data-endpoint="/DemoRoom2">Room 2</button>
-        <button class="btn-secondary" data-endpoint="/DemoRoom3">Room 3</button>
-        <button class="btn-secondary" data-endpoint="/DemoRoom4">Room 4</button>
-        <button class="btn-secondary" data-endpoint="/DemoRoom5">Room 5</button>
-        <button class="btn-secondary" data-endpoint="/DemoRoom6">Room 6</button>
-        <button class="btn-secondary" data-endpoint="/DemoRoom7">Room 7</button>
+        <button class="btn-secondary" data-endpoint="/DemoCabinRoom">CabinRoom</button>
+        <button class="btn-secondary" data-endpoint="/DemoBathroom">Bathroom</button>
+        <button class="btn-secondary" data-endpoint="/DemoShowerHallway">ShowerHallway</button>
+        <button class="btn-secondary" data-endpoint="/DemoDynamicHallway">DynamicHallway</button>
+        <button class="btn-secondary" data-endpoint="/DemoBasement">Basement</button>
+        <button class="btn-secondary" data-endpoint="/DemoPalletHallway">PalletHallway</button>
+        <button class="btn-secondary" data-endpoint="/DemoForestHallway">ForestHallway</button>
       </div>
       <div class="status"><span class="dot" id="dot-demo"></span><span id="msg-demo" class="small">No actions yet</span></div>
     </section>
@@ -151,20 +151,20 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
             setDoorState(2, "CLOSED")
         elif message == "/ToggleHouseLights":
             toggleHouseLights()
-        elif message == "/DemoRoom1":
-            demoEvent(Room_1.__name__.split('.')[-1])
-        elif message == "/DemoRoom2":
-            demoEvent(Room_2.__name__.split('.')[-1])
-        elif message == "/DemoRoom3":
-            demoEvent(Room_3.__name__.split('.')[-1])
-        elif message == "/DemoRoom4":
-            demoEvent(Room_4.__name__.split('.')[-1])
-        elif message == "/DemoRoom5":
-            demoEvent(Room_5.__name__.split('.')[-1])
-        elif message == "/DemoRoom6":
-            demoEvent(Room_6.__name__.split('.')[-1])
-        elif message == "/DemoRoom7":
-            demoEvent(Room_7.__name__.split('.')[-1])
+        elif message == "/DemoCabinRoom":
+            demoEvent(CabinRoom.__name__.split('.')[-1])
+        elif message == "/DemoBathroom":
+            demoEvent(Bathroom.__name__.split('.')[-1])
+        elif message == "/DemoShowerHallway":
+            demoEvent(ShowerHallway.__name__.split('.')[-1])
+        elif message == "/DemoDynamicHallway":
+            demoEvent(DynamicHallway.__name__.split('.')[-1])
+        elif message == "/DemoBasement":
+            demoEvent(Basement.__name__.split('.')[-1])
+        elif message == "/DemoPalletHallway":
+            demoEvent(PalletHallway.__name__.split('.')[-1])
+        elif message == "/DemoForestHallway":
+            demoEvent(ForestHallway.__name__.split('.')[-1])
 
         self.send_response(200)
         self.send_header("Content-type", "text/html")

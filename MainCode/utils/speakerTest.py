@@ -10,7 +10,7 @@ from control.audio_manager import initialize_audio
 from context import house
 
 
-def testAudio(test_sound="waterWave01.wav", gain=1, announce_delay=2, sound_delay=3):
+def testAudio(test_sound="waterWave01.wav", gain=1, announce_delay=2, sound_delay=2):
     # Standalone file playback must satisfy the same BreakCheck state as rooms.
     house.HouseActive = True
     house.systemState = "ONLINE"

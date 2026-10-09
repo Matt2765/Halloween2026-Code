@@ -10,18 +10,18 @@ import threading
 
 # m1Digital_Write(33, 0)
 # setDoorState(1, "OPEN")           # "CLOSED" / "CLOPEN" also supported
-# play_audio("Room_7", "Hit.wav", gain=1)  # threaded=True / looping=True
+# play_audio("CabinRoom", "Hit.wav", gain=1)  # threaded=True / looping=True
 # if BreakCheck(): return
 # while not rsm.obstructed("TOF2", block_mm=800, window_ms=250, min_consecutive=2):
 #     if BreakCheck(): return
 #     t.sleep(0.05)
-# log_event("[Room_7] Effect...")
+# log_event("[CabinRoom] Effect...")
 # toggleHouseLights(True)  # False = OFF
-# threading.Thread(target=function_name, daemon=True, name="Room_7 effect").start()
+# threading.Thread(target=function_name, daemon=True, name="CabinRoom effect").start()
 
 def run():
-    log_event("[Room_7] Starting...")
-    house.Room_7_state = "ACTIVE"
+    log_event("[CabinRoom] Starting...")
+    house.CabinRoom_state = "ACTIVE"
 
     try:
         # Room startup here
@@ -32,6 +32,25 @@ def run():
 
             # Sequencing here
 
+            setDoorState(1, "CLOPEN")
+
+            play_audio("CabinRoom_Wall", "cabinRoomIntrov10.wav", gain=1)
+            play_audio("CabinRoom_PA", "cabinRoomIntrov10.wav", gain=1)
+
+            wait(6)
+
+            rsm.lantern(1, "intense_flickering_on")
+
+            wait(28)
+
+            rsm.lantern(2, "intense_flicker_out")
+
+            wait(16)
+
+            rsm.lantern(3, "flickering_on")
+
+            wait(30)
+
             if BreakCheck() or house.Demo:
                 if house.Demo:
                     house.Demo = False
@@ -41,5 +60,5 @@ def run():
 
             t.sleep(0.1)
     finally:
-        house.Room_7_state = "INACTIVE"
-        log_event("[Room_7] Exiting.")
+        house.CabinRoom_state = "INACTIVE"
+        log_event("[CabinRoom] Exiting.")

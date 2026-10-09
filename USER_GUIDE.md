@@ -89,7 +89,7 @@ from control.audio_manager import play_audio
 The main idea is:
 
 - Audio hardware is configured once at the top of `audio_manager.py`.
-- Named locations like `"Room_1"` or custom room names map to physical output channels.
+- Named locations like `"CabinRoom"` or custom room names map to physical output channels.
 - Each physical device uses one persistent mixer stream. Multiple sounds can overlap without repeatedly opening the device.
 - Short clips are cached in memory, while long files are streamed through a bounded buffer.
 - Audio files are loaded from `Assets/SoundDir` by default.
@@ -186,12 +186,12 @@ The primary device uses:
 
 ```python
 primary_channels = {
-    "Room_1": {"index": 0, "gain": 1.0},
-    "Room_2": {"index": 1, "gain": 1.0},
-    "Room_3": {"index": 2, "gain": 1.0},
+    "CabinRoom": {"index": 0, "gain": 1.0},
+    "Bathroom": {"index": 1, "gain": 1.0},
+    "ShowerHallway": {"index": 2, "gain": 1.0},
     "primary_LFE": {"index": 3, "gain": 1.0},
-    "Room_4": {"index": 4, "gain": 1.0},
-    "Room_5": {"index": 5, "gain": 1.0},
+    "DynamicHallway": {"index": 4, "gain": 1.0},
+    "Basement": {"index": 5, "gain": 1.0},
     "primary_BL": {"index": 6, "gain": 1.0},
     "primary_BR": {"index": 7, "gain": 1.0},
 }
@@ -236,13 +236,13 @@ A mono named channel routes audio to one physical output channel. Stereo source 
 Set it in the table:
 
 ```python
-"Room_3": {"index": 2, "gain": 1.0}
+"ShowerHallway": {"index": 2, "gain": 1.0}
 ```
 
 Use it like this:
 
 ```python
-play_audio("Room_3", "effect.wav")
+play_audio("ShowerHallway", "effect.wav")
 ```
 
 This plays `Assets/SoundDir/effect.wav` on physical channel `2` of the primary device, using the default channel gain of `1.0`.
@@ -316,7 +316,7 @@ Arguments:
 
 `target_or_text` 
 This argument can be: 
-- The named channel (ex. Room_1)
+- The named channel (ex. CabinRoom)
 - "all" (plays on all channels)
 - Any other string. This will be played as TTS (text-to-speech)
 - "channel: text" for TTS on a specific channel.
@@ -336,19 +336,19 @@ This argument can be:
 Play a WAV on a named room channel:
 
 ```python
-play_audio("Room_3", "effect.wav")
+play_audio("ShowerHallway", "effect.wav")
 ```
 
 Play louder or quieter for one call:
 
 ```python
-play_audio("Room_2", "effect.wav", gain=0.8)
+play_audio("Bathroom", "effect.wav", gain=0.8)
 ```
 
 Start looping ambience:
 
 ```python
-play_audio("Room_5", "ambience.wav", gain=1.0, looping=True)
+play_audio("Basement", "ambience.wav", gain=1.0, looping=True)
 ```
 
 Block until a scene file finishes:
@@ -372,12 +372,12 @@ play_audio("System rebooting", gain=0.3)
 Speak text-to-speech on a named channel:
 
 ```python
-play_audio("Room_3: This is a test message", gain=0.7)
+play_audio("ShowerHallway: This is a test message", gain=0.7)
 ```
 
 ### 6.9 Lower-Level Playback Helpers
 
-`play_to_named_channel(...)` is what `play_audio("Room_3", "file.wav")` calls internally:
+`play_to_named_channel(...)` is what `play_audio("ShowerHallway", "file.wav")` calls internally:
 
 ```python
 play_to_named_channel(
@@ -419,7 +419,7 @@ For normal use, always use `play_audio(...)`.
 Normal file playback respects shutdown:
 
 ```python
-play_audio("Room_3", "effect.wav")
+play_audio("ShowerHallway", "effect.wav")
 ```
 
 `stop_all_audio()` signals all normal file streams to stop and waits briefly for them to finish. TTS streams ignore this and finish naturally.
@@ -451,7 +451,7 @@ from control.audio_manager import register_primary_channel, register_secondary_c
 
 register_primary_channel("custom_primary_output", 4, gain=1.0)
 register_secondary_channel("custom_secondary_output", 6, gain=0.8)
-set_channel_gain("Room_3", 1.2)
+set_channel_gain("ShowerHallway", 1.2)
 ```
 
 These changes only last for the current Python process.
@@ -870,7 +870,7 @@ If the controller is in simulated mode, the ACK latency test is skipped and logg
 ---
 
 ## 9. Examples
-- To trigger a sound in a room: `play_audio('Room_1', 'spooky.wav')`
+- To trigger a sound in a room: `play_audio('CabinRoom', 'spooky.wav')`
 - To log an event: `log_event('Door opened')`
 - To toggle demo mode: `toggle_demo_mode(state, enable=True)`
 

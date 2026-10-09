@@ -25,25 +25,54 @@ def shutdown():
                     pass
         return False
 
-    # ---------------- Room_1 ----------------
-    log_event("SHUTDOWN - Room_1:")
-    m1Digital_Write(47, 1); log_event("+12v Door, Solenoid A OFF")
+    # ---------------- Cabin Room ----------------
+    log_event("SHUTDOWN - Cabin Room:")
+    m1Digital_Write(43, 1); log_event("+12v Air Blast 1 (E) OFF")
+    m1Digital_Write(47, 1); log_event("+12v Air Blast 2 (B) OFF")
+    m1Digital_Write(22, 1); log_event("+120v Strobe 1 (B) OFF")
+    m1Digital_Write(26, 1); log_event("+120v Lanterns 1 (B) OFF")
+    m1Digital_Write(24, 1); log_event("+120v Lanterns 2 (B) OFF")
+    m1Digital_Write(28, 1); log_event("+120v Lightning (C) OFF")
+    m1Digital_Write(39, 1); log_event("+12v Door 1 Solenoid (E) OFF")
+    m1Digital_Write(41, 1); log_event("+12v Door 2 Solenoid (E) OFF")
+    m1Digital_Write(45, 1); log_event("+12v Door 3 Solenoid (E) OFF")
 
-    # ---------------- Room_2 ----------------
-    log_event("SHUTDOWN - Room_2:")
-    m1Digital_Write(3, 1);  log_event("+120v Ambient Light 4 (G) OFF")
+    # ---------------- Shower Hallway ----------------
+    log_event("SHUTDOWN - Shower Hallway:")
+    m1Digital_Write(30, 1); log_event("+120v Ambient Light 1 (M) OFF")
+    m1Digital_Write(32, 1); log_event("+120v Strobe 1 (M) OFF")
+    m1Digital_Write(34, 1); log_event("+120v Shower Light (M) OFF")
+    m1Digital_Write(36, 1); log_event("+120v Lanterns (M) OFF")
 
-    # ---------------- Room_3 ----------------
-    log_event("SHUTDOWN - Room_3:")
-    m1Digital_Write(9,  1); log_event("+120v Strobe 2 (F) OFF")
+    # ---------------- Basement ----------------
+    log_event("SHUTDOWN - Basement:")
+    m1Digital_Write(61, 1); log_event("Smoke Machine 3 (N) OFF")
+    m1Digital_Write(49, 1); log_event("+12v Laser Pneumatic 1 (D) OFF")
+    m1Digital_Write(51, 1); log_event("+12v Laser Pneumatic 2 (D) OFF")
+    m1Digital_Write(37, 1); log_event("+120v Strobe 5 (N) OFF")
+    m1Digital_Write(53, 1); log_event("+12v Door 6 Solenoid (D) OFF")
 
-    # ---------------- Room_4 ----------------
-    log_event("SHUTDOWN - Room_4:")
-    m1Digital_Write(45, 1); log_event("+12v Enemy Cannon Solenoid (L) OFF")
+    # ---------------- Bathroom ----------------
+    log_event("SHUTDOWN - Bathroom:")
+    m1Digital_Write(35, 1); log_event("+120v Strobe 2 (F) OFF")
+    m1Digital_Write(33, 1); log_event("+120v Mirror Light (F) OFF")
+    m1Digital_Write(60, 1); log_event("Smoke Machine 1 (H) OFF")
+    m1Digital_Write(31, 1); log_event("+120v Magic Light (F) OFF")
+    m1Digital_Write(38, 1); log_event("+12v Door 3 Solenoid (H) OFF")
+    m1Digital_Write(40, 1); log_event("+12v Door 5 Solenoid (H) OFF")
 
-    # ---------------- Room_5 ----------------
-    log_event("SHUTDOWN - Room_5:")
-    m1Digital_Write(49, 1); log_event("+12v Barrel Solenoid (D) OFF")
+    # ---------------- Dynamic Hallway ----------------
+    log_event("SHUTDOWN - Dynamic Hallway:")
+
+    # ---------------- Pallet Hallway ----------------
+    log_event("SHUTDOWN - Pallet Hallway:")
+    m1Digital_Write(29, 1); log_event("+120v Strobe 3 (K) OFF")
+    m1Digital_Write(27, 1); log_event("+120v Pallet Backlight (K) OFF")
+    m1Digital_Write(25, 1); log_event("+120v Blacklight (K) OFF")
+
+    # ---------------- Graveyard ----------------
+    log_event("SHUTDOWN - Graveyard:")
+    m1Digital_Write(58, 1); log_event("Industrial Smoke Machine 5 (L) OFF")
 
     t.sleep(1)
     toggleHouseLights(True)

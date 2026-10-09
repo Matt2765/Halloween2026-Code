@@ -1,7 +1,7 @@
 # ui/gui.py
 import tkinter as tk
 import threading
-from MainCode.rooms import Room_1, Room_2, Room_3, Room_4, Room_5, Room_6, Room_7
+from MainCode.rooms import CabinRoom, Bathroom, ShowerHallway, DynamicHallway, Basement, PalletHallway, ForestHallway
 from context import house
 from control.shutdown import shutdown
 from control.doors import setDoorState
@@ -18,20 +18,20 @@ def demoEvent(room):
     toggleHouseLights(False)
     log_event(f"[GUI] Starting demo of {room}")
 
-    if room == Room_1.__name__.split('.')[-1]:
-        threading.Thread(target=Room_1.run, args=(), name=f"{room} demo").start()
-    elif room == Room_2.__name__.split('.')[-1]:
-        threading.Thread(target=Room_2.run, args=(), name=f"{room} demo").start()
-    elif room == Room_3.__name__.split('.')[-1]:
-        threading.Thread(target=Room_3.run, args=(), name=f"{room} demo").start()
-    elif room == Room_4.__name__.split('.')[-1]:
-        threading.Thread(target=Room_4.run, args=(), name=f"{room} demo").start()
-    elif room == Room_5.__name__.split('.')[-1]:
-        threading.Thread(target=Room_5.run, args=(), name=f"{room} demo").start()
-    elif room == Room_6.__name__.split('.')[-1]:
-        threading.Thread(target=Room_6.run, args=(), name=f"{room} demo").start()
-    elif room == Room_7.__name__.split('.')[-1]:
-        threading.Thread(target=Room_7.run, args=(), name=f"{room} demo").start()
+    if room == CabinRoom.__name__.split('.')[-1]:
+        threading.Thread(target=CabinRoom.run, args=(), name=f"{room} demo").start()
+    elif room == Bathroom.__name__.split('.')[-1]:
+        threading.Thread(target=Bathroom.run, args=(), name=f"{room} demo").start()
+    elif room == ShowerHallway.__name__.split('.')[-1]:
+        threading.Thread(target=ShowerHallway.run, args=(), name=f"{room} demo").start()
+    elif room == DynamicHallway.__name__.split('.')[-1]:
+        threading.Thread(target=DynamicHallway.run, args=(), name=f"{room} demo").start()
+    elif room == Basement.__name__.split('.')[-1]:
+        threading.Thread(target=Basement.run, args=(), name=f"{room} demo").start()
+    elif room == PalletHallway.__name__.split('.')[-1]:
+        threading.Thread(target=PalletHallway.run, args=(), name=f"{room} demo").start()
+    elif room == ForestHallway.__name__.split('.')[-1]:
+        threading.Thread(target=ForestHallway.run, args=(), name=f"{room} demo").start()
 
 
 def change_system_state(new_state):
@@ -68,20 +68,20 @@ def MainGUI():
               command=lambda: setDoorState(2, "CLOSED")).place(x=150, y=285)
 
     # DEMO CONTROLS (strip "rooms." prefix)
-    tk.Button(root, text=f"Demo {Room_1.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Room_1.__name__.split('.')[-1])).place(x=25, y=430)
-    tk.Button(root, text=f"Demo {Room_2.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Room_2.__name__.split('.')[-1])).place(x=150, y=430)
-    tk.Button(root, text=f"Demo {Room_3.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Room_3.__name__.split('.')[-1])).place(x=275, y=430)
-    tk.Button(root, text=f"Demo {Room_4.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Room_4.__name__.split('.')[-1])).place(x=25, y=480)
-    tk.Button(root, text=f"Demo {Room_5.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Room_5.__name__.split('.')[-1])).place(x=150, y=480)
-    tk.Button(root, text=f"Demo {Room_6.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Room_6.__name__.split('.')[-1])).place(x=275, y=480)
-    tk.Button(root, text=f"Demo {Room_7.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Room_7.__name__.split('.')[-1])).place(x=25, y=530)
+    tk.Button(root, text=f"Demo {CabinRoom.__name__.split('.')[-1]}", height=2, width=15,
+              command=lambda: demoEvent(CabinRoom.__name__.split('.')[-1])).place(x=25, y=430)
+    tk.Button(root, text=f"Demo {Bathroom.__name__.split('.')[-1]}", height=2, width=15,
+              command=lambda: demoEvent(Bathroom.__name__.split('.')[-1])).place(x=150, y=430)
+    tk.Button(root, text=f"Demo {ShowerHallway.__name__.split('.')[-1]}", height=2, width=15,
+              command=lambda: demoEvent(ShowerHallway.__name__.split('.')[-1])).place(x=275, y=430)
+    tk.Button(root, text=f"Demo {DynamicHallway.__name__.split('.')[-1]}", height=2, width=15,
+              command=lambda: demoEvent(DynamicHallway.__name__.split('.')[-1])).place(x=25, y=480)
+    tk.Button(root, text=f"Demo {Basement.__name__.split('.')[-1]}", height=2, width=15,
+              command=lambda: demoEvent(Basement.__name__.split('.')[-1])).place(x=150, y=480)
+    tk.Button(root, text=f"Demo {PalletHallway.__name__.split('.')[-1]}", height=2, width=15,
+              command=lambda: demoEvent(PalletHallway.__name__.split('.')[-1])).place(x=275, y=480)
+    tk.Button(root, text=f"Demo {ForestHallway.__name__.split('.')[-1]}", height=2, width=15,
+              command=lambda: demoEvent(ForestHallway.__name__.split('.')[-1])).place(x=25, y=530)
 
     tk.Button(root, text="Toggle House Lights", height=3, width=25, bg="chartreuse2",
               command=toggleHouseLights).place(x=250, y=125)

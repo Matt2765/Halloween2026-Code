@@ -35,12 +35,12 @@ from utils.tools import log_event
 # Run `python utils/audio_mixer_diagnostic.py` from MainCode to list the output
 # devices.  Set these to the corresponding *output* device indexes.  Do not use
 # a microphone/input index: it has zero output channels.
-PRIMARY_DEVICE_INDEX: int | None = 13  # Primary multichannel output
-SECONDARY_DEVICE_INDEX: int | None = 30  # Secondary multichannel output
+PRIMARY_DEVICE_INDEX: int | None = 16  # Primary multichannel output
+SECONDARY_DEVICE_INDEX: int | None = 4  # Secondary multichannel output
 
 # Optional device-name fragments protect against Windows reassigning indexes
 # after a USB/HDMI device is unplugged. None checks only output channel capacity.
-PRIMARY_DEVICE_NAME: str | None = "RX-V673"
+PRIMARY_DEVICE_NAME: str | None = "DENON-AVAMP"
 SECONDARY_DEVICE_NAME: str | None = "CUBILUX"
 
 # If a configured device is unavailable, continue through Windows' default
@@ -99,9 +99,9 @@ primary_channels: ChannelMap = {
     "DynamicHallway": {"index": 2, "gain": 1.0},
     "primary_LFE": {"index": 3, "gain": 1.0},
     "Surround Back Left": {"index": 4, "gain": 1.0},
-    "Surround Back Right": {"index": 5, "gain": 1.0},
-    "Surround Left": {"index": 6, "gain": 1.0},
-    "Surround Right": {"index": 7, "gain": 1.0},
+    "Shower Hallway": {"index": 5, "gain": 1.0},
+    "Bathroom": {"index": 6, "gain": 1.0},
+    "Basement": {"index": 7, "gain": 1.0},
     # "stereo_primary_pair": {"index": [0, 1], "gain": 1.0},
     # Or use stereo_primary_pair_L / stereo_primary_pair_R entries.
 }
@@ -929,9 +929,9 @@ def play_audio(
 ) -> None:
     """Convenience API for room audio and text-to-speech.
 
-    ``play_audio("Room_1", "hit.wav")`` routes a WAV to the named room.
+    ``play_audio("CabinRoom", "hit.wav")`` routes a WAV to the named room.
     ``play_audio("all", "hit.wav")`` broadcasts a WAV on the primary output.
-    ``play_audio("Room_1: Welcome")`` speaks on a named route, while bare
+    ``play_audio("CabinRoom: Welcome")`` speaks on a named route, while bare
     text is spoken on every primary channel.  TTS is always non-blocking and
     intentionally ignores break/shutdown requests.
     """

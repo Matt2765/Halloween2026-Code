@@ -10,13 +10,13 @@ class HouseState:
         self.houseLights = True
         self.remote_sensor_value = None
 
-        self.Room_1_state = "INACTIVE"
-        self.Room_2_state = "INACTIVE"
-        self.Room_3_state = "INACTIVE"
-        self.Room_4_state = "INACTIVE"
-        self.Room_5_state = "INACTIVE"
-        self.Room_6_state = "INACTIVE"
-        self.Room_7_state = "INACTIVE"
+        self.CabinRoom_state = "INACTIVE"
+        self.Bathroom_state = "INACTIVE"
+        self.ShowerHallway_state = "INACTIVE"
+        self.DynamicHallway_state = "INACTIVE"
+        self.Basement_state = "INACTIVE"
+        self.PalletHallway_state = "INACTIVE"
+        self.ForestHallway_state = "INACTIVE"
 
         self.DoorState = {}
         self.TargetDoorState = {}
@@ -26,4 +26,4 @@ class HouseState:
 
         self.DEBUG_INFO = True
         self.DEBUG_BREAKCHECK = True
-        self.DISABLE_REMOTE_SENSOR_MONITOR = True # True disables ESP32 monitoring and its event logs
+        self.DISABLE_REMOTE_SENSOR_MONITOR = False # True disables ESP32 monitoring and its event logs
