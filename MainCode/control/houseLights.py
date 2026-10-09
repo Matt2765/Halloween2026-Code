@@ -6,7 +6,7 @@ from control import dimmer_controller as dim
 
 # Define the pin numbers for the house lights followed by the digital value that determines their ON state.
 house_light_pins = {
-    26: 0,
+    2: 0,
     23: 0,
     22: 1
 }
