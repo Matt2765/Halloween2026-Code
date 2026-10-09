@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from .persistence import load
 
-SHARE_URL = 'https://storage.aimlessworksdrive.space/s/K6QniDyteowwaNt'
+SHARE_URL = 'https://storage.aimlessworksdrive.space/s/gRGPkt42fTYsQit'
 MAX_BYTES = 100_000_000
 
 
