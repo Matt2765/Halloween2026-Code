@@ -31,6 +31,11 @@ def run():
                 break
 
             # Sequencing here
+            for i in range(5):
+                m1Digital_Write(33, 0)
+                wait(1)
+                m1Digital_Write(33, 1)
+                wait(1)
 
             if BreakCheck() or house.Demo:
                 if house.Demo:

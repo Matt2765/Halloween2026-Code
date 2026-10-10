@@ -33,6 +33,15 @@ def run():
 
             # Sequencing here
 
+            '''count = 0
+            while not rsm.get_button_value("BTN2"):
+                if count > 3:
+                    continue
+                count += 0.05
+                t.sleep(.05)
+                if BreakCheck():
+                    return'''
+
             setDoorState(1, "CLOPEN")
 
             play_audio("CabinRoom_Wall", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.2)
