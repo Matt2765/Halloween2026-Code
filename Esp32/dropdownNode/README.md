@@ -7,7 +7,8 @@ button, and an actor-ready LED. Edit the configuration at the top of
 | Connection | Default |
 | --- | --- |
 | Servo signal | GPIO 4 |
-| Button | GPIO 5 to GND, internal pull-up, pressed = LOW |
+| Button | GPIO 5 to GPIO 6 (or GND), internal pull-up, pressed = LOW |
+| Button return | GPIO 6, output held LOW after startup |
 | Blue onboard LED | GPIO 8, active LOW, off at startup |
 | Servo startup angle | 90 degrees, or the saved `set_default` value |
 | Servo pulse range | 500–2500 microseconds at 50 Hz |
@@ -15,7 +16,9 @@ button, and an actor-ready LED. Edit the configuration at the top of
 
 LED pins/polarity vary by board: set `LED_PIN` and `LED_ACTIVE_HIGH` to match
 yours. This sketch uses low-speed, 14-bit LEDC at 50 Hz for the C3, preserving
-servoNode's angle/ramp behavior. Power the servo from an appropriate supply with
+servoNode's angle/ramp behavior. GPIO 6 is a logic LOW for the button return only;
+use an actual GND pin for the servo and power-supply ground.
+Power the servo from an appropriate supply with
 a common ground to the ESP32. Adjust pulse/angle limits to your mechanism.
 GPIO 4 and GPIO 5 refer to the board's printed GPIO numbers. GPIO 8 drives the
 onboard blue LED; the red power indicator is not controlled by this sketch.
@@ -61,7 +64,15 @@ with the existing remote buttons. Servo angles describe PWM, not measured motion
 
 Flash the updated `transceiver` bridge and new `dropdownNode`, and run the updated
 Python RSM. Existing nodes retain their wire formats and need no reflash.
-Use the same HauntProtocol library. In Arduino IDE select **ESP32C3 Dev Module**
+Before building in Arduino IDE, copy the repository's complete
+`Esp32/libraries/HauntProtocol` folder into your sketchbook's `libraries` folder,
+replacing the older installed HauntProtocol copy. On this workstation that is
+`C:\Users\minen\OneDrive\Documents\Arduino\libraries\HauntProtocol`.
+Repeat this copy after protocol-library updates. Missing `DROPDOWN` or `LED`
+compiler errors mean an older library copy is being used. The CLI command below
+selects the repository library explicitly; Arduino IDE uses the installed copy.
+
+In Arduino IDE select **ESP32C3 Dev Module**
 and enable **USB CDC On Boot** for the Super Mini's native USB port. Compile:
 
 ```powershell

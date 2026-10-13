@@ -5,7 +5,8 @@ using namespace haunt;
 // ===== PER-FLASH DEVICE CONFIGURATION =====
 const char* DEVICE_ID = "DROPDOWN1"; // Unique on the network; used in RSM calls.
 constexpr int SERVO_PIN = 4;
-constexpr int BUTTON_PIN = 5; // Connect button between GPIO 5 and GND.
+constexpr int BUTTON_PIN = 5; // Connect button between GPIO 5 and GPIO 6 (or GND).
+constexpr int BUTTON_GND_PIN = 6; // Held LOW for button return only; not a power ground.
 constexpr int LED_PIN = 8; // Blue onboard LED on ESP32-C3 Super Mini.
 constexpr bool LED_ACTIVE_HIGH = false; // Super Mini's blue LED lights when LOW.
 constexpr bool DEFAULT_LED_ON = false;
@@ -18,6 +19,7 @@ constexpr uint32_t DIAGNOSTIC_MS = 10000;
 // This powered actuator stays awake so it can always receive servo/LED commands.
 // ========================================
 static_assert(SERVO_PIN!=BUTTON_PIN && SERVO_PIN!=LED_PIN && BUTTON_PIN!=LED_PIN,"Pins must be distinct");
+static_assert(BUTTON_GND_PIN!=SERVO_PIN && BUTTON_GND_PIN!=BUTTON_PIN && BUTTON_GND_PIN!=LED_PIN,"Button return pin must be distinct");
 static_assert(0<=MIN_ANGLE && MIN_ANGLE<=DEFAULT_ANGLE && DEFAULT_ANGLE<=MAX_ANGLE && MAX_ANGLE<=180,"Invalid angle limits");
 static_assert(0<SERVO_MIN_US && SERVO_MIN_US<SERVO_MAX_US && SERVO_MAX_US<20000,"Invalid PWM limits");
 
@@ -71,6 +73,8 @@ Code command(const Received& r) {
   return ACCEPTED;
 }
 void setup() {
+  digitalWrite(BUTTON_GND_PIN,LOW);
+  pinMode(BUTTON_GND_PIN,OUTPUT);
   pinMode(BUTTON_PIN,INPUT_PULLUP);
   pinMode(LED_PIN,OUTPUT); setLed(DEFAULT_LED_ON);
   ledc_timer_config_t timer{};
