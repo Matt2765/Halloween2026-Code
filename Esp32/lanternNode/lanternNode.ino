@@ -2,7 +2,7 @@
 #include <driver/ledc.h>
 using namespace haunt;
 // ===== PER-FLASH DEVICE CONFIGURATION =====
-const char* DEVICE_ID = "LANTERN1"; // Flash LANTERN1..LANTERN4 with unique IDs.
+const char* DEVICE_ID = "LANTERN4"; // Flash LANTERN1..LANTERN4 with unique IDs.
 constexpr int LIGHT_PIN = 4;       // C3 Super Mini GPIO4: PWM to LED driver/MOSFET.
 constexpr int SYNC_BUTTON_PIN = 5;  // C3 Super Mini GPIO5: button to GND; pull-up.
 constexpr bool LIGHT_ACTIVE_HIGH = true;
