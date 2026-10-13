@@ -880,3 +880,26 @@ If the controller is in simulated mode, the ACK latency test is skipped and logg
 
 ---
 ---
+
+
+## Pedro animatronic bird
+
+Use **Start Pedro** / **Stop Pedro** in the main GUI or HTTP remote page while
+ONLINE. These controls are independent of START HOUSE. Shutdown stops Pedro's
+voice and motion. Stop parks him and keeps an off heartbeat for a solid red LED.
+
+His voice uses the existing audio manager, default named route `CabinRoom_Wall`,
+and the recordings in `Assets/SoundDir/Quips`. Change the default in
+`MainCode/control/pedro_service.py`, or specify a route from your sequence:
+
+```python
+from control.pedro_service import start_pedro, stop_pedro
+start_pedro("CabinRoom_Wall", gain=0.8)
+# Later:
+stop_pedro()
+```
+
+Stop before changing routes. Repeated starts do not create duplicate workers.
+The service shares the main ESP bridge connection; do not also run Pedro's
+standalone CLI against that port. See [Pedro setup](Esp32/pedroNode/README.md)
+for optional ambience, standalone commands, wiring and protocol details.

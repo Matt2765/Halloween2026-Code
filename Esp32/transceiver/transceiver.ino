@@ -118,6 +118,14 @@ Code received(const Received& r) {
     case SPRITE:
       doc["kind"]="sprite"; vals["index"]=b[0]; vals["command_session"]=get32(b+1); vals["command_seq"]=get32(b+5);
       vals["playback_confirmed"]=false; vals["serial_issued"]=true; vals["ready"]=true; break;
+    case PEDRO: {
+      const char* states[]={"off","standby","active"};
+      doc["kind"]="pedro"; vals["pedro_state"]=states[b[0]]; vals["controller_connected"]=bool(b[1]);
+      vals["wings_angle"]=get16(b+2); vals["wings_target"]=get16(b+4);
+      vals["beak_angle"]=get16(b+6); vals["beak_target"]=get16(b+8);
+      vals["neck"]=bool(b[10]); vals["eyes"]=bool(b[11]); vals["moving"]=bool(b[12]);
+      vals["command_session"]=get32(b+13); vals["command_seq"]=get32(b+17); vals["ready"]=true; break;
+    }
     case LANTERN: {
       const char* states[]={"off","solid_on","flickering_on","intense_flickering_on","flicker_out","intense_flicker_out","strobe"};
       doc["kind"]="lantern"; vals["lantern_state"]=states[b[0]];
@@ -165,21 +173,31 @@ void usbLine(const char* line) {
   if(!strcmp(op,"play")) operation=PLAY;
   if(!strcmp(op,"next")) operation=NEXT;
   if(!strcmp(op,"lantern")) operation=LANTERN_STATE;
+  if(!strcmp(op,"pedro")) operation=PEDRO_POSE;
   if(!operation||!doc["value"].is<uint16_t>()||!doc["duration_ms"].is<uint32_t>()) {
     resultLine(cid,id,"rejected","invalid_command"); return;
   }
   uint16_t value=doc["value"]; uint32_t duration=doc["duration_ms"];
+  if(operation==PEDRO_POSE && (value>2 || !doc["wings"].is<uint16_t>() || doc["wings"].as<uint16_t>()>180 ||
+     !doc["beak"].is<uint16_t>() || doc["beak"].as<uint16_t>()>180 ||
+     !doc["neck"].is<bool>() || !doc["eyes"].is<bool>())) {
+    resultLine(cid,id,"rejected","invalid_pedro_pose"); return;
+  }
   if((operation!=LANTERN_STATE && duration>30000) || ((operation==MOVE||operation==SET_DEFAULT)&&value>180) || (operation==PLAY&&value>200) ||
      (operation==LANTERN_STATE && (value>LANTERN_STATE_MAX || duration<1 || duration==0xffffffff || !doc["sync_generation"].is<uint32_t>()))) {
     resultLine(cid,id,"rejected","out_of_range"); return;
   }
-  if(operation==MOVE||operation==SET_DEFAULT) radio.cancel(id,SUPERSEDED);
+  if(operation==MOVE||operation==SET_DEFAULT||operation==PEDRO_POSE) radio.cancel(id,SUPERSEDED);
   Request* request=nullptr;
   for(auto& r:requests) if(!r.used) { request=&r; break; }
   if(!request) { resultLine(cid,id,"rejected","queue_full"); return; }
-  auto p=radio.make(COMMAND,id,operation==LANTERN_STATE?15:11,true); put32(p.payload,peer->session); p.payload[4]=operation;
+  auto p=radio.make(COMMAND,id,operation==LANTERN_STATE?15:operation==PEDRO_POSE?17:11,true); put32(p.payload,peer->session); p.payload[4]=operation;
   put16(p.payload+5,value); put32(p.payload+7,duration);
   if(operation==LANTERN_STATE) put32(p.payload+11,doc["sync_generation"].as<uint32_t>());
+  if(operation==PEDRO_POSE) {
+    put16(p.payload+11,doc["wings"].as<uint16_t>()); put16(p.payload+13,doc["beak"].as<uint16_t>());
+    p.payload[15]=doc["neck"].as<bool>(); p.payload[16]=doc["eyes"].as<bool>();
+  }
   if(!radio.send(p)) { resultLine(cid,id,"rejected","queue_full"); return; }
   request->used=true; request->seq=p.seq; strcpy(request->cid,cid);
   resultLine(cid,id,"pending","bridge_retry_owner",p.seq);

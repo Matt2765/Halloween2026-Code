@@ -6,6 +6,7 @@ from utils.tools import log_event
 from context import house
 from ui.gui import demoEvent
 import threading
+from control.pedro_service import start_pedro, stop_pedro
 
 HOST = "0.0.0.0"  # Listen on all interfaces
 PORT = 9999
@@ -74,6 +75,14 @@ WEBPAGE = '''<!doctype html>
       <div class="status"><span class="dot" id="dot-lights"></span><span id="msg-lights" class="small">No actions yet</span></div>
     </section>
     <section class="section">
+      <h2>Pedro</h2>
+      <div class="row">
+        <button class="btn-primary" data-endpoint="/PedroStart">Start Pedro</button>
+        <button class="btn-secondary" data-endpoint="/PedroStop">Stop Pedro</button>
+      </div>
+      <div class="status"><span class="dot" id="dot-pedro"></span><span id="msg-pedro" class="small">No actions yet</span></div>
+    </section>
+    <section class="section">
       <h2>Demo Controls</h2>
       <div class="row">
         <button class="btn-secondary" data-endpoint="/DemoCabinRoom">CabinRoom</button>
@@ -137,6 +146,14 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
 
         elif message == "/START":
             threading.Thread(target=StartHouse, daemon=True, name="HOUSE").start()
+        elif message == "/PedroStart":
+            if not start_pedro():
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(b"Pedro could not start; check the main system log.")
+                return
+        elif message == "/PedroStop":
+            threading.Thread(target=stop_pedro, daemon=True, name="Pedro stop").start()
         elif message == "/EMERGENCY_SHUTOFF":
             house.systemState = "EmergencyShutoff"
         elif message == "/SOFT_SHUTDOWN":

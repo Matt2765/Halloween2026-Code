@@ -130,12 +130,22 @@ _cache_lock = threading.Lock()
 _stop_event = threading.Event()
 
 
-class _Session:
+class PlaybackHandle:
+    """Completion and scoped cancellation for one file playback."""
     def __init__(self, epoch: int, label: str):
         self.epoch = epoch
         self.label = label
         self.created_at = time.monotonic()
         self.done = threading.Event()
+        self.cancelled = False
+
+    def stop(self) -> None:
+        self.cancelled = True
+        for mixer in tuple(_mixers.values()):
+            mixer.stop_matching(lambda voice: voice.session is self)
+
+
+_Session = PlaybackHandle  # Preserve internal/session compatibility.
 
 
 _active_sessions: list[_Session] = []
@@ -431,6 +441,7 @@ class DeviceMixer:
             for voice in self.voices:
                 if predicate(voice):
                     voice.stopped = True
+                    voice.session.cancelled = True
 
     def _route(self, output: FloatArray, block: FloatArray, voice: _Voice) -> None:
         frames = len(block)
@@ -788,7 +799,8 @@ def _submit(
     honor_breakcheck: bool,
     threaded: bool,
     force_cached: bool = False,
-) -> None:
+    deduplicate: bool = True,
+) -> PlaybackHandle:
     session = _Session(_next_epoch(), f"{path.name}@{name or 'all'}")
     if mode == "all":
         kind: DeviceKind = "primary"
@@ -825,7 +837,7 @@ def _submit(
         honor_shutdown,
         honor_breakcheck,
     )
-    if mixer.fallback_to_all:
+    if mixer.fallback_to_all and deduplicate:
         voice.fallback_key = (str(path.resolve()), float(gain), looping,
                               honor_shutdown, honor_breakcheck)
         voice.fallback_routes = {f"{kind}:{name or 'all'}"}
@@ -833,13 +845,15 @@ def _submit(
     with _epoch_lock:
         if honor_shutdown and session.epoch <= _cutoff_epoch:
             voice.source.close()
+            session.cancelled = True
             session.done.set()
-            return
+            return session
         with _active_lock:
             _active_sessions.append(session)
         session = mixer.add(voice)
     if not threaded:
         session.done.wait()
+    return session
 
 def play_to_named_channel(
     wav_file: str,
@@ -851,7 +865,8 @@ def play_to_named_channel(
     honor_shutdown: bool = True,
     honor_breakcheck: bool = True,
     threaded: bool = True,
-) -> None:
+    deduplicate: bool = True,
+) -> PlaybackHandle:
     """Play a WAV on one configured mono or stereo named route."""
     path = _resolve_sound_path(wav_file, base_folder or DEFAULT_SOUND_DIR)
     if not path.exists():
@@ -861,7 +876,8 @@ def play_to_named_channel(
         f"[Audio] Playing '{path.name}' -> {target_name}, gain={gain}, "
         f"looping={looping}, threaded={threaded}"
     )
-    _submit(path, target_name, "one", 0, gain, looping, honor_shutdown, honor_breakcheck, threaded)
+    return _submit(path, target_name, "one", 0, gain, looping, honor_shutdown, honor_breakcheck, threaded,
+                   deduplicate=deduplicate)
 
 
 def _speak(text: str, name: str | None, gain: float, rate: int) -> None:
@@ -903,7 +919,8 @@ def play_to_all_channels(
     honor_shutdown: bool = True,
     honor_breakcheck: bool = True,
     threaded: bool = True,
-) -> None:
+    deduplicate: bool = True,
+) -> PlaybackHandle | None:
     """Play a WAV, or speak text, on every channel of the primary output."""
     base = Path(base_folder) if base_folder else DEFAULT_SOUND_DIR
     path = _resolve_sound_path(wav_or_text, base)
@@ -911,8 +928,8 @@ def play_to_all_channels(
     if Path(wav_or_text).suffix.lower() == ".wav" or path.exists():
         if not path.exists():
             raise FileNotFoundError(path)
-        _submit(path, None, "all", 0, gain, looping, honor_shutdown, honor_breakcheck, threaded)
-        return
+        return _submit(path, None, "all", 0, gain, looping, honor_shutdown, honor_breakcheck, threaded,
+                       deduplicate=deduplicate)
 
     _speak(wav_or_text, None, gain, tts_rate)
 
@@ -926,34 +943,39 @@ def play_audio(
     tts_rate: int = 0,
     looping: bool = False,
     threaded: bool = True,
-) -> None:
+    honor_breakcheck: bool = True,
+    deduplicate: bool = True,
+) -> PlaybackHandle | None:
     """Convenience API for room audio and text-to-speech.
 
     ``play_audio("CabinRoom", "hit.wav")`` routes a WAV to the named room.
     ``play_audio("all", "hit.wav")`` broadcasts a WAV on the primary output.
     ``play_audio("CabinRoom: Welcome")`` speaks on a named route, while bare
     text is spoken on every primary channel.  TTS is always non-blocking and
-    intentionally ignores break/shutdown requests.
+    intentionally ignores break/shutdown requests. File playback returns a
+    handle with `done`, `cancelled` and `stop()`; callers may ignore it as before.
     """
     if maybe_file:
         if target_or_text.lower() == "all":
-            play_to_all_channels(
+            return play_to_all_channels(
                 maybe_file,
                 gain_override=gain,
                 base_folder=base_folder,
                 looping=looping,
                 threaded=threaded,
+                honor_breakcheck=honor_breakcheck,
+                deduplicate=deduplicate,
             )
-            return
-        play_to_named_channel(
+        return play_to_named_channel(
             maybe_file,
             target_or_text,
             gain_override=gain,
             base_folder=base_folder,
             looping=looping,
             threaded=threaded,
+            honor_breakcheck=honor_breakcheck,
+            deduplicate=deduplicate,
         )
-        return
 
     if ":" in target_or_text:
         name, text = (value.strip() for value in target_or_text.split(":", 1))

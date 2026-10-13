@@ -4,9 +4,9 @@
 #include <string.h>
 namespace haunt {
 constexpr size_t ID_BYTES = 16, HEADER = 46, MAX_PAYLOAD = 64;
-enum Type : uint8_t { TOF=1, BUTTON=2, PIR=3, SERVO=4, SPRITE=5, COMMAND=6, ACK=7, DIAGNOSTIC=8, LANTERN=9 };
+enum Type : uint8_t { TOF=1, BUTTON=2, PIR=3, SERVO=4, SPRITE=5, COMMAND=6, ACK=7, DIAGNOSTIC=8, LANTERN=9, PEDRO=10 };
 enum Code : uint8_t { ACCEPTED=0, INVALID=1, SUPERSEDED=2, WRONG_SESSION=3, CONFLICT=4, QUEUE_FULL=5, UNCONFIRMED=6 };
-enum Op : uint8_t { MOVE=1, SET_DEFAULT=2, PLAY=3, NEXT=4, LANTERN_STATE=5 };
+enum Op : uint8_t { MOVE=1, SET_DEFAULT=2, PLAY=3, NEXT=4, LANTERN_STATE=5, PEDRO_POSE=6 };
 constexpr uint8_t ACK_REQUIRED = 1;
 constexpr uint8_t LANTERN_STATE_MAX = 6; // Existing 0..5 unchanged; 6 = strobe.
 inline bool newer(uint32_t a, uint32_t b) { return int32_t(a-b)>0; }
@@ -41,9 +41,14 @@ inline bool shape(const Packet& p) {
     case SERVO: return p.length==17 && b[4]<=1 && get16(b)<=180 && get16(b+2)<=180 && (get16(b+15)==0xffff || get16(b+15)<=180);
     case SPRITE: return p.length==9 && b[0]<=200;
     case LANTERN: return p.length==19 && b[0]<=LANTERN_STATE_MAX && b[1]<=1 && get32(b+3)>=1;
+    case PEDRO: return p.length==21 && b[0]<=2 && b[1]<=1 &&
+      get16(b+2)<=180 && get16(b+4)<=180 && get16(b+6)<=180 && get16(b+8)<=180 &&
+      b[10]<=1 && b[11]<=1 && b[12]<=1;
     case COMMAND: return p.flags==ACK_REQUIRED && strcmp(p.dst,"*") &&
-      ((p.length==11 && b[4]!=LANTERN_STATE) ||
-       (p.length==15 && b[4]==LANTERN_STATE && get16(b+5)<=LANTERN_STATE_MAX && get32(b+7)>=1 && get32(b+7)<0xffffffff));
+      ((p.length==11 && b[4]!=LANTERN_STATE && b[4]!=PEDRO_POSE) ||
+       (p.length==15 && b[4]==LANTERN_STATE && get16(b+5)<=LANTERN_STATE_MAX && get32(b+7)>=1 && get32(b+7)<0xffffffff) ||
+       (p.length==17 && b[4]==PEDRO_POSE && get16(b+5)<=2 && get32(b+7)<=30000 &&
+        get16(b+11)<=180 && get16(b+13)<=180 && b[15]<=1 && b[16]<=1));
     case ACK: return p.length==9 && !p.flags && b[8]<=UNCONFIRMED && strcmp(p.dst,"*");
     case DIAGNOSTIC: return p.length==24;
     default: return false;

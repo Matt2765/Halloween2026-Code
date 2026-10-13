@@ -10,6 +10,7 @@ from utils.tools import log_event
 
 # NEW: read-only sensor values
 from control import remote_sensor_monitor as rsm  # minimal addition
+from control.pedro_service import start_pedro, stop_pedro, pedro_status
 
 
 def demoEvent(room):
@@ -82,6 +83,10 @@ def MainGUI():
               command=lambda: demoEvent(PalletHallway.__name__.split('.')[-1])).place(x=275, y=480)
     tk.Button(root, text=f"Demo {ForestHallway.__name__.split('.')[-1]}", height=2, width=15,
               command=lambda: demoEvent(ForestHallway.__name__.split('.')[-1])).place(x=25, y=530)
+    tk.Button(root, text="Start Pedro", height=2, width=15, font=("Helvetica", -14),
+              command=lambda: threading.Thread(target=start_pedro, daemon=True, name="Pedro start").start()).place(x=150, y=530)
+    tk.Button(root, text="Stop Pedro", height=2, width=15, font=("Helvetica", -14),
+              command=lambda: threading.Thread(target=stop_pedro, daemon=True, name="Pedro stop").start()).place(x=275, y=530)
 
     tk.Button(root, text="Toggle House Lights", height=3, width=25, bg="chartreuse2",
               command=toggleHouseLights).place(x=250, y=125)
@@ -171,9 +176,15 @@ def MainGUI():
         lantern_labels[sid] = lbl
     command_label = tk.Label(panel, text="", font=small, bg="orange", wraplength=405, justify="left")
     command_label.grid(row=3, column=0, sticky="w", pady=(4, 0))
+    pedro_label = tk.Label(panel, text="Pedro stopped", font=small, bg="orange", wraplength=405, justify="left")
+    pedro_label.grid(row=4, column=0, sticky="w", pady=(4, 0))
 
     # ===== Live updater (every 100 ms, reads only; no serial waits) =====
     def _update_status():
+        pedro = pedro_status()
+        pedro_text = "running" if pedro["running"] and pedro["connected"] else "waiting for link" if pedro["running"] else "stopped"
+        pedro_label.config(text=f"Pedro {pedro_text} | {pedro['channel']}" +
+                           (f" | {pedro['error']}" if pedro["error"] else ""))
         for sid, lbl in tof_labels.items():
             value = rsm.get_value(sid, "dist_mm")
             lbl.config(text=f"{value} mm" if value is not None else rsm.device_status(sid)["state"])

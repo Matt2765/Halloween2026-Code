@@ -17,6 +17,7 @@ from utils.tools import log_event, BreakCheck, wait
 from control.doors import spawn_doors
 import control.dimmer_controller as dim
 from control.shutdown import shutdown
+from control.pedro_service import start_pedro, stop_pedro
 import random
 
 def initialize_system():

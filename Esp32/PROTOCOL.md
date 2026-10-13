@@ -1,5 +1,18 @@
 # Unified ESP-NOW installation and protocol v1
 
+## Pedro extension
+
+The additive Pedro integration is documented in [pedroNode/README.md](pedroNode/README.md).
+Flash the updated bridge and new `pedroNode` (`PEDRO1`); existing nodes need no
+reflash for this extension. Type **10 Pedro** has a 21-byte telemetry payload;
+operation **6 Pedro pose** uses a 17-byte command for state, two servo angles
+and digital neck/eyes outputs. The existing 11-byte and lantern 15-byte command
+shapes are unchanged. USB adds `op:"pedro"` and `kind:"pedro"`; RSM adds
+`pedro(...)` and `get_pedro_state(...)`. `MainCode/pedro.py` is the Pedro-only
+replacement for the old Firmata controller. Python owns audio and motion timing;
+the node executes full poses and parks after 2.5 seconds without accepted Pedro
+commands. See its README for the exact schema, indicator states and run commands.
+
 ## Lantern extension
 
 The additive lantern integration is documented in [lanternNode/README.md](lanternNode/README.md).

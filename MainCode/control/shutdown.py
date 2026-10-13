@@ -6,12 +6,14 @@ from control.houseLights import toggleHouseLights
 from control.audio_manager import play_audio, stop_all_audio
 from control.arduino import m1Digital_Write
 from utils.thread_diagnostics import dump_threads
+from control.pedro_service import stop_pedro
 
 def shutdown():
     log_event("[Shutdown] Executing shutdown routine...")
 
     house.HouseActive = False
     house.testing = False
+    stop_pedro()
 
     def _dim_off(ch: int):
         for fn_name in ("dim_set", "setDimLevel", "set_dimmer_level",

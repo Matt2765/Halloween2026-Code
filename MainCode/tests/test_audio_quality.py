@@ -74,6 +74,43 @@ class AudioQualityTests(unittest.TestCase):
             audio.play_audio("quality_left", str(self.path), gain=0.25)
         self.assertEqual(len(mixer.voices), 2)
 
+    def test_file_handle_reports_natural_completion(self):
+        mixer = self.mixer()
+        with patch.object(audio, "_mixer", return_value=mixer):
+            handle = audio.play_audio("quality_left", str(self.path))
+        self.assertIsInstance(handle, audio.PlaybackHandle)
+        self.assertFalse(handle.done.is_set())
+        self.render(mixer)
+        self.assertTrue(handle.done.is_set())
+        self.assertFalse(handle.cancelled)
+
+    def test_scoped_stop_preserves_other_audio_even_on_fallback_same_file(self):
+        mixer = self.mixer(True)
+        with patch.object(audio, "_mixer", return_value=mixer), patch.dict(audio._mixers, {"primary": mixer}, clear=True):
+            room = audio.play_audio("quality_left", str(self.path), looping=True)
+            bird = audio.play_audio("quality_right", str(self.path), looping=True, deduplicate=False)
+            self.assertEqual(len(mixer.voices), 2)
+            bird.stop()
+            np.testing.assert_array_equal(self.render(mixer), self.samples)
+            self.assertTrue(bird.done.is_set())
+            self.assertTrue(bird.cancelled)
+            self.assertFalse(room.done.is_set())
+            self.assertFalse(room.cancelled)
+            self.assertEqual(len(mixer.voices), 1)
+
+    def test_shutdown_during_decoding_returns_cancelled_handle(self):
+        mixer = self.mixer()
+
+        def source(*args):
+            audio.stop_all_audio(timeout=0)
+            return audio._CachedSource(self.samples, False)
+
+        with patch.object(audio, "_mixer", return_value=mixer), patch.object(audio, "_source", side_effect=source):
+            handle = audio.play_audio("quality_left", str(self.path))
+        self.assertTrue(handle.cancelled)
+        self.assertTrue(handle.done.is_set())
+        self.assertEqual(len(mixer.voices), 0)
+
     def test_configured_mono_routes_stay_independent_and_use_both_source_sides(self):
         mixer = self.mixer()
         with patch.object(audio, "_mixer", return_value=mixer):
