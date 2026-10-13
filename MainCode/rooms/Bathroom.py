@@ -25,16 +25,35 @@ def run():
 
     try:
         # Room startup here
+        rsm.servo("DROPDOWN1", '190') #frame in lowered position
+        rsm.led("DROPDOWN1", False)
 
         while house.HouseActive or house.Demo:
             if BreakCheck():
                 break
 
-            test = input("servo angle:")
-            rsm.servo("DROPDOWN1", test)
-            rsm.led("DROPDOWN1", True)
+            '''while True:
+                test = input("enter deg:")
+                rsm.servo("DROPDOWN1", test)'''
+
             wait(1)
+            rsm.servo("DROPDOWN1", '190')
+            log_event("190 deg")
             rsm.led("DROPDOWN1", False)
+
+            wait(2)
+
+            log_event("waiting...")
+
+            while not rsm.get_button_value("DROPDOWN1"):
+                t.sleep(.05)
+                if BreakCheck():
+                    return
+            rsm.led("DROPDOWN1", True)
+            rsm.servo("DROPDOWN1", '90')
+            log_event("90 deg")
+
+            wait(3)
 
             # Sequencing here
             for i in range(1):

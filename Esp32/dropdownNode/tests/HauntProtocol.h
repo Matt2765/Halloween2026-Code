@@ -2,6 +2,8 @@
 #include "../../libraries/HauntProtocol/src/HauntWire.h"
 #include <algorithm>
 #include <cstdlib>
+#include <cstdio>
+#include <string>
 #include <vector>
 #define LOW 0
 #define HIGH 1
@@ -25,9 +27,18 @@ struct Preferences {
 };
 struct FakeEsp {void restart(){std::abort();}};
 inline FakeEsp ESP;
+struct FakeSerial {
+ bool connected=false; int capacity=512; std::string written;
+ void begin(unsigned long){}
+ explicit operator bool() const {return connected;}
+ int availableForWrite() const {return capacity;}
+ size_t write(const uint8_t* data,size_t n){written.append(reinterpret_cast<const char*>(data),n);return n;}
+};
+inline FakeSerial Serial;
 namespace haunt {
 struct Received {Packet packet;};
 struct Radio {
+ struct {uint32_t drops=0,sendErrors=0,retries=0,unconfirmed=0;} stats;
  Registry registry; uint32_t session=1,sequence=0;
  std::vector<Packet> sent;
  bool begin(const char*,Code(*)(const Received&)){return true;}

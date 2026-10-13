@@ -24,6 +24,6 @@ class HouseState:
         self.smokeSequence = 1
         self.laserSequence = False
 
-        self.DEBUG_INFO = True
+        self.DEBUG_INFO = True # Extra troubleshooting detail; normal events/errors still log.
         self.DEBUG_BREAKCHECK = True
         self.DISABLE_REMOTE_SENSOR_MONITOR = False # True disables ESP32 monitoring and its event logs

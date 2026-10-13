@@ -15,6 +15,8 @@ constexpr int SERVO_MIN_US = 500, SERVO_MAX_US = 2500;
 constexpr uint32_t DEBOUNCE_MS = 30;
 constexpr uint32_t MOVING_REPORT_MS = 200, IDLE_REPORT_MS = 2000;
 constexpr uint32_t DIAGNOSTIC_MS = 10000;
+constexpr const char* NODE_BUILD = "dropdown-2026-10-12-r2";
+constexpr uint32_t USB_DIAGNOSTIC_MS = 1000;
 // Network/retries: libraries/HauntProtocol/src/HauntConfig.h
 // This powered actuator stays awake so it can always receive servo/LED commands.
 // ========================================
@@ -29,6 +31,7 @@ Debounced button;
 bool ledOn=DEFAULT_LED_ON, initialButton=true;
 int bootAngle=DEFAULT_ANGLE;
 uint32_t commandSession=0,commandSequence=0,lastStatus=0,lastDiagnostic=0,buttonBegan=0;
+uint32_t reportCount=0,commandCount=0,lastUsbDiagnostic=0,lastLoop=0,maxLoopGap=0;
 int angleToUs(int angle) { return SERVO_MIN_US+(SERVO_MAX_US-SERVO_MIN_US)*angle/180; }
 int usToAngle(int us) { return ((us-SERVO_MIN_US)*180+(SERVO_MAX_US-SERVO_MIN_US)/2)/(SERVO_MAX_US-SERVO_MIN_US); }
 void output() {
@@ -42,16 +45,20 @@ void setLed(bool on) {
   digitalWrite(LED_PIN,(on==LED_ACTIVE_HIGH)?HIGH:LOW);
 }
 void report(bool edge=false) {
-  auto p=radio.make(DROPDOWN,BRIDGE_ID,19,edge);
+  // Idle availability must not depend on a single unacknowledged broadcast.
+  // Moving snapshots remain replaceable; initial/button edges always retry.
+  auto p=radio.make(DROPDOWN,BRIDGE_ID,19,edge || !ramp.moving());
   put16(p.payload,usToAngle(ramp.current)); put16(p.payload+2,usToAngle(ramp.target)); p.payload[4]=ramp.moving();
   put16(p.payload+5,ramp.current); put32(p.payload+7,commandSession); put32(p.payload+11,commandSequence);
   put16(p.payload+15,0xffff); // No shaft sensor: angles describe generated PWM.
   p.payload[17]=button.stable; p.payload[18]=ledOn;
   if(!radio.send(p)) radio.diagnostic();
+  reportCount++;
   lastStatus=millis();
 }
 Code command(const Received& r) {
   const auto& p=r.packet; if(p.type!=COMMAND || p.length!=11) return INVALID;
+  commandCount++;
   auto peer=radio.registry.find(p.src); if(peer&&peer->conflict) return CONFLICT;
   auto op=p.payload[4]; int value=get16(p.payload+5); uint32_t ms=get32(p.payload+7);
   if(op==LED) {
@@ -73,6 +80,7 @@ Code command(const Received& r) {
   return ACCEPTED;
 }
 void setup() {
+  Serial.begin(115200); // Optional native USB diagnostics; never wait for a host.
   digitalWrite(BUTTON_GND_PIN,LOW);
   pinMode(BUTTON_GND_PIN,OUTPUT);
   pinMode(BUTTON_PIN,INPUT_PULLUP);
@@ -91,7 +99,25 @@ void setup() {
   if(!radio.begin(DEVICE_ID,command)) { delay(1000); ESP.restart(); }
   buttonBegan=millis(); // Publish only after the initial input has settled.
 }
+void usbDiagnostic(uint32_t now) {
+  if(now-lastUsbDiagnostic<USB_DIAGNOSTIC_MS) return;
+  lastUsbDiagnostic=now;
+  // Never let an absent/slow Serial Monitor stall the actuator or radio.
+  if(!Serial) return;
+  char line[256];
+  int n=snprintf(line,sizeof(line),
+    "%s id=%s uptime_ms=%lu session=%lu reports=%lu commands=%lu max_loop_gap_ms=%lu drops=%lu send_errors=%lu retries=%lu unconfirmed=%lu\n",
+    NODE_BUILD,DEVICE_ID,(unsigned long)now,(unsigned long)radio.session,
+    (unsigned long)reportCount,(unsigned long)commandCount,(unsigned long)maxLoopGap,
+    (unsigned long)radio.stats.drops,(unsigned long)radio.stats.sendErrors,
+    (unsigned long)radio.stats.retries,(unsigned long)radio.stats.unconfirmed);
+  if(n>0 && n<int(sizeof(line)) && Serial.availableForWrite()>=n)
+    Serial.write(reinterpret_cast<const uint8_t*>(line),size_t(n));
+}
 void loop() {
+  uint32_t began=millis();
+  if(lastLoop && began-lastLoop>maxLoopGap) maxLoopGap=began-lastLoop;
+  lastLoop=began;
   bool completed=ramp.tick(millis()); output(); radio.poll();
   uint32_t now=millis();
   bool changed=button.sample(digitalRead(BUTTON_PIN)==LOW,now,DEBOUNCE_MS);
@@ -102,5 +128,6 @@ void loop() {
   } else if(changed) report(true); // Same reliable press/release delivery as remote buttons.
   else if(completed||now-lastStatus>=(ramp.moving()?MOVING_REPORT_MS:IDLE_REPORT_MS)) report();
   if(now-lastDiagnostic>=DIAGNOSTIC_MS) { lastDiagnostic=now; radio.diagnostic(); }
+  usbDiagnostic(now);
   delay(2);
 }

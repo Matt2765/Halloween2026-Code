@@ -155,12 +155,14 @@ def MainGUI():
 
     tk.Label(right, text="SERVOS", font=status_heading, bg="orange").grid(row=0, column=0, columnspan=4, sticky="w")
 
-    servo_ids = ["SERVO1", "SERVO2"]  # edit as needed
+    servo_ids = ["DROPDOWN1", "SERVO1", "SERVO2"]  # edit as needed
     servo_labels = {}
     for i, sid in enumerate(servo_ids):
-        tk.Label(right, text=sid, font=small, bg="orange").grid(row=1, column=i*2, sticky="w", padx=(0, 6))
+        row, column = (1, 0) if sid == "DROPDOWN1" else (2, (i-1)*2)
+        tk.Label(right, text=sid, font=small, bg="orange").grid(row=row, column=column, sticky="w", padx=(0, 6))
         lbl = tk.Label(right, text="--°", font=small, bg="orange")
-        lbl.grid(row=1, column=i*2+1, sticky="w", padx=(0, 12))
+        lbl.grid(row=row, column=column+1, columnspan=3 if sid == "DROPDOWN1" else 1,
+                 sticky="w", padx=(0, 12))
         servo_labels[sid] = lbl
 
     lantern_frame = tk.Frame(panel, bg="orange")
@@ -200,11 +202,14 @@ def MainGUI():
         for sid, lbl in servo_labels.items():
             state = rsm.get_servo_state(sid)
             angle = state.get("output_angle")
+            age = state.get("age_ms")
+            heard = "--" if age is None else f"{age / 1000:.1f}s"
             if state["state"] in ("stale", "unavailable", "conflict") or angle is None:
-                lbl.config(text=state["state"])
+                text = state["state"]
             else:
                 motion = " move" if state.get("moving") else ""
-                lbl.config(text=f"PWM {angle}°{motion}")
+                text = f"PWM {angle}°{motion}"
+            lbl.config(text=f"{text} / {heard}" if sid == "DROPDOWN1" else text)
 
         for sid, lbl in pir_labels.items():
             state = rsm.get_pir_state(sid)
@@ -233,8 +238,12 @@ def MainGUI():
             message = "RSM DISABLED"
         elif health.get("error") and "conflict" in health["error"].get("message", "").lower():
             message = health["error"]["message"]
+        elif not health["connected"]:
+            message = "Bridge unavailable"
         elif failure:
-            message = f"{failure['id']}: {failure['status']} ({failure.get('reason', '')})"
+            detail = failure.get("detail") or failure.get("reason", "")
+            message = (f"Last failure ({failure['age_ms'] // 1000}s ago): "
+                       f"{failure['id']} {failure.get('op', '')}: {failure['status']} ({detail})")
         else:
             message = "" if health["connected"] else "Bridge unavailable"
         command_label.config(text=message, fg="red" if health["disabled"] else "black")

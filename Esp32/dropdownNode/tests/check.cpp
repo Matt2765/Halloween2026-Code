@@ -16,13 +16,14 @@ int main() {
  levels[BUTTON_PIN]=LOW;tick(100);levels[BUTTON_PIN]=HIGH;tick(110);
  levels[BUTTON_PIN]=LOW;tick(120);tick(149);assert(!button.stable);
  tick(150);assert(button.stable && radio.sent.back().flags && radio.sent.back().payload[17]);
- tick(2150);assert(button.stable && !radio.sent.back().flags && radio.sent.back().payload[17]);
+ tick(2150);assert(button.stable && radio.sent.back().flags && radio.sent.back().payload[17]);
  levels[BUTTON_PIN]=HIGH;tick(2160);tick(2190);
  assert(!button.stable && radio.sent.back().flags && !radio.sent.back().payload[17]);
- tick(4190);assert(!radio.sent.back().flags && !radio.sent.back().payload[17]);
+ tick(4190);assert(radio.sent.back().flags && !radio.sent.back().payload[17]);
  // Turning the actor light on/off does not change or restart a servo ramp.
  assert(command(request(MOVE,150,1000))==ACCEPTED);
  tick(4690);int halfway=ramp.current;assert(ramp.moving());
+ assert(!radio.sent.back().flags); // Moving snapshots do not occupy reliable slots.
  assert(command(request(LED,1,0,2))==ACCEPTED);
  assert(ledOn && levels[LED_PIN]==LOW && ramp.current==halfway && ramp.target==angleToUs(150));
  assert(commandSequence==1 && radio.sent.back().payload[18]==1);
@@ -50,5 +51,14 @@ int main() {
  assert(registry.order(request(MOVE,90,0,9).packet,*peer)==SUPERSEDED);
  // Existing servo wire format is unchanged.
  status.type=SERVO;status.length=17;assert(shape(status));
+ // USB diagnostics cannot block radio processing when disconnected or full.
+ auto reports=reportCount;Serial.connected=false;tick(7000);
+ assert(reportCount>reports && Serial.written.empty());
+ Serial.connected=true;Serial.capacity=0;reports=reportCount;tick(9000);
+ assert(reportCount>reports && Serial.written.empty());
+ Serial.capacity=512;tick(10000);
+ assert(Serial.written.find(NODE_BUILD)!=std::string::npos);
+ assert(Serial.written.find("commands=")!=std::string::npos);
+ assert(Serial.written.find("max_loop_gap_ms=")!=std::string::npos);
  puts("Dropdown firmware debounce, servo/LED independence, persistence and wire checks passed");
 }

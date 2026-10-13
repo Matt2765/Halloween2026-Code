@@ -176,6 +176,8 @@ def _store_device(shared, obj, now):
     new = {"id": sid, "kind": kind, "session": session, "seq": seq,
            "mac": mac, "vals": vals, "t_host_ms": now, "fw": obj.get("fw"),
            "sequence_gaps": obj.get("sequence_gaps", 0)}
+    if rec and "diagnostics" in rec:
+        new["diagnostics"] = rec["diagnostics"]
     if kind in ("button", "dropdown"):
         buttons = dict(rec.get("buttons", {})) if rec else {}
         buttons[str(vals["btn"])] = {"seq": seq, "pressed": vals["pressed"], "t_host_ms": now}
@@ -236,11 +238,16 @@ def _log_event(message):
     log_event(f"[RSM] {message}")
 
 
-def _log_device_changes(previous, current, now, tof_events):
+def _log_device_changes(previous, current, now, tof_events, debug_info=False):
     """Log accepted, fresh telemetry transitions rather than every heartbeat."""
     sid, kind, vals = current["id"], current["kind"], current["vals"]
     if current.get("conflict"):
         return
+    if debug_info and kind == "dropdown" and previous:
+        if previous["session"] != current["session"]:
+            _log_event(f"{sid} restarted: session {previous['session']} -> {current['session']}")
+        elif now - previous["t_host_ms"] >= DEVICE_FRESH_MS and now - current["t_host_ms"] < DEVICE_FRESH_MS:
+            _log_event(f"{sid} telemetry resumed after {now - previous['t_host_ms']} ms")
     if previous and (previous["session"] != current["session"] or previous.get("conflict")):
         previous = None
     if kind == "tof":
@@ -282,10 +289,33 @@ def _log_device_changes(previous, current, now, tof_events):
             _log_event(f"{sid} state: {vals['lantern_state']}")
 
 
-def _monitor_main(shared, commands, txq, port, baud):
+def _log_dropdown_commands(commands, logged, debug_info=False):
+    """Log each completed dropdown outcome once, including the submission snapshot."""
+    if not debug_info:
+        return
+    records = dict(commands.items())
+    for cid in list(logged):
+        if cid not in records:
+            del logged[cid]
+    for cid, rec in records.items():
+        if rec.get("kind") != "dropdown" and rec["id"] != "DROPDOWN1":
+            continue
+        status = rec["status"]
+        if status in ("queued", "pending") or logged.get(cid) == status:
+            continue
+        _log_event(f"{rec['id']} {rec.get('op')}={rec.get('value')} {status}: "
+                   f"{rec.get('detail') or rec.get('reason', '')}; command_id={cid}; "
+                   f"bridge_connected={rec.get('bridge_connected')}; "
+                   f"device_state={rec.get('device_state')}; age_ms={rec.get('device_age_ms')}; "
+                   f"session={rec.get('device_session')}; diagnostics={rec.get('device_diagnostics', {})}")
+        logged[cid] = status
+
+
+def _monitor_main(shared, commands, txq, port, baud, debug_info=False):
     backoff = 0.25
     last_error_log = None
     tof_events = {}
+    logged_commands = {}
     _log_event(f"Starting monitor on {port or 'auto-detected port'} at {baud} baud")
     while True:
         connection = None
@@ -314,7 +344,7 @@ def _monitor_main(shared, commands, txq, port, baud):
                         previous = shared.get(obj.get("id")) if isinstance(obj, dict) and obj.get("type") == "device" else None
                         accepted = _ingest(shared, commands, obj, received_at)
                         if accepted and obj.get("type") == "device":
-                            _log_device_changes(previous, shared[obj["id"]], received_at, tof_events)
+                            _log_device_changes(previous, shared[obj["id"]], received_at, tof_events, debug_info)
                         last_valid = _now_ms()
                         if obj["type"] == "hello" and obj.get("host") == token:
                             if not handshake:
@@ -351,10 +381,12 @@ def _monitor_main(shared, commands, txq, port, baud):
                 for cid, rec in list(commands.items()):
                     if rec["status"] in ("queued", "pending") and now - rec["created_ms"] > 2000:
                         commands[cid] = dict(rec, status="unconfirmed", reason="result_timeout", t_host_ms=now)
+                _log_dropdown_commands(commands, logged_commands, debug_info)
         except (OSError, serial.SerialException, RuntimeError) as error:
             shared["_connection"] = {"connected": False}
             shared["_error"] = {"message": str(error), "t_host_ms": _now_ms()}
             _finish_pending(commands, "usb_disconnected")
+            _log_dropdown_commands(commands, logged_commands, debug_info)
             now = _now_ms()
             if last_error_log is None or now - last_error_log >= CONNECTION_LOG_INTERVAL_MS:
                 _log_event(f"Bridge unavailable: {error}. Retrying connection...")
@@ -386,7 +418,8 @@ def init(port=None, baud=DEFAULT_BAUD):
         _manager = mp.Manager()
     _shared, _commands = _manager.dict(), _manager.dict()
     _txq = mp.Queue(maxsize=32)
-    _proc = mp.Process(target=_monitor_main, args=(_shared, _commands, _txq, port, baud), daemon=True)
+    _proc = mp.Process(target=_monitor_main,
+                       args=(_shared, _commands, _txq, port, baud, bool(house.DEBUG_INFO)), daemon=True)
     _proc.start()
     _started = True
     atexit.register(stop)
@@ -520,8 +553,17 @@ def command_status(command_id):
 
 def command_failure():
     records = list(_commands.values()) if _commands is not None else []
-    failures = [rec for rec in records if rec["status"] in ("rejected", "unconfirmed")]
-    return max(failures, key=lambda rec: rec["t_host_ms"]) if failures else None
+    recovered = {}
+    for rec in records:
+        if rec["status"] == "accepted":
+            key = (rec["id"], rec.get("op"))
+            recovered[key] = max(recovered.get(key, -1), rec["created_ms"])
+    failures = [rec for rec in records if rec["status"] in ("rejected", "unconfirmed") and
+                recovered.get((rec["id"], rec.get("op")), -1) <= rec["created_ms"]]
+    if not failures:
+        return None
+    latest = max(failures, key=lambda rec: rec["t_host_ms"])
+    return dict(latest, age_ms=max(0, _now_ms() - latest["t_host_ms"]))
 
 
 def tx_to_id(device_id, payload):
@@ -576,9 +618,17 @@ def tx_to_id(device_id, payload):
                 raise RuntimeError("Command history full")
             del _commands[min(completed, key=lambda pair: pair[1]["created_ms"])[0]]
         connection, device = get("_connection") or {}, get(device_id)
-        rec = {"command_id": cid, "id": device_id, "status": "queued", "created_ms": now, "t_host_ms": now}
-        if not connection.get("connected") or not device or not device_status(device_id)["available"]:
-            _commands[cid] = dict(rec, status="rejected", reason="unavailable_or_disconnected")
+        status = device_status(device_id)
+        rec = {"command_id": cid, "id": device_id, "status": "queued", "created_ms": now, "t_host_ms": now,
+               "op": op, "value": value, "duration_ms": duration, "kind": device.get("kind") if device else None,
+               "bridge_connected": bool(connection.get("connected")), "device_state": status["state"],
+               "device_age_ms": status["age_ms"], "device_session": device.get("session") if device else None,
+               "device_diagnostics": device.get("diagnostics", {}) if device else {}}
+        if not connection.get("connected") or not device or not status["available"]:
+            detail = ("bridge_disconnected" if not connection.get("connected") else
+                      "device_not_seen" if not device else
+                      "device_id_conflict" if status["state"] == "conflict" else "device_telemetry_expired")
+            _commands[cid] = dict(rec, status="rejected", reason="unavailable_or_disconnected", detail=detail)
             return cid
         request = {"v": 1, "type": "command", "host": connection["host"], "command_id": cid,
                    "id": device_id, "target_session": device["session"], "op": op, "value": value, "duration_ms": duration}
