@@ -22,7 +22,7 @@ public:
   void poll();
   Packet make(Type type,const char* destination,uint8_t length,bool reliable=false);
   bool send(const Packet& p);
-  void cancel(const char* destination=nullptr,Code why=SUPERSEDED);
+  void cancel(const char* destination=nullptr,Code why=SUPERSEDED,uint8_t operation=0);
   bool busy() const;
   void diagnostic();
 private:

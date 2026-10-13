@@ -4,9 +4,9 @@
 #include <string.h>
 namespace haunt {
 constexpr size_t ID_BYTES = 16, HEADER = 46, MAX_PAYLOAD = 64;
-enum Type : uint8_t { TOF=1, BUTTON=2, PIR=3, SERVO=4, SPRITE=5, COMMAND=6, ACK=7, DIAGNOSTIC=8, LANTERN=9, PEDRO=10 };
+enum Type : uint8_t { TOF=1, BUTTON=2, PIR=3, SERVO=4, SPRITE=5, COMMAND=6, ACK=7, DIAGNOSTIC=8, LANTERN=9, PEDRO=10, DROPDOWN=11 };
 enum Code : uint8_t { ACCEPTED=0, INVALID=1, SUPERSEDED=2, WRONG_SESSION=3, CONFLICT=4, QUEUE_FULL=5, UNCONFIRMED=6 };
-enum Op : uint8_t { MOVE=1, SET_DEFAULT=2, PLAY=3, NEXT=4, LANTERN_STATE=5, PEDRO_POSE=6 };
+enum Op : uint8_t { MOVE=1, SET_DEFAULT=2, PLAY=3, NEXT=4, LANTERN_STATE=5, PEDRO_POSE=6, LED=7 };
 constexpr uint8_t ACK_REQUIRED = 1;
 constexpr uint8_t LANTERN_STATE_MAX = 6; // Existing 0..5 unchanged; 6 = strobe.
 inline bool newer(uint32_t a, uint32_t b) { return int32_t(a-b)>0; }
@@ -32,20 +32,23 @@ struct Packet {
 };
 inline bool shape(const Packet& p) {
   if(!validId(p.src)||!validId(p.dst,true)||p.flags>1||p.length>MAX_PAYLOAD) return false;
-  if(p.flags && (!strcmp(p.dst,"*") || (p.type!=TOF&&p.type!=BUTTON&&p.type!=PIR&&p.type!=COMMAND))) return false;
+  if(p.flags && (!strcmp(p.dst,"*") || (p.type!=TOF&&p.type!=BUTTON&&p.type!=PIR&&p.type!=COMMAND&&p.type!=DROPDOWN))) return false;
   const uint8_t* b=p.payload;
   switch(p.type) {
     case TOF: return p.length==5 && b[0]<=1 && (!b[0] || (int16_t(get16(b+1))>=0 && get16(b+3)==0));
     case BUTTON: return p.length==2 && b[0]>=1 && b[0]<=8 && b[1]<=1;
     case PIR: return p.length==2 && b[0]<=1 && b[1]<=1;
     case SERVO: return p.length==17 && b[4]<=1 && get16(b)<=180 && get16(b+2)<=180 && (get16(b+15)==0xffff || get16(b+15)<=180);
+    case DROPDOWN: return p.length==19 && b[4]<=1 && get16(b)<=180 && get16(b+2)<=180 &&
+      (get16(b+15)==0xffff || get16(b+15)<=180) && b[17]<=1 && b[18]<=1;
     case SPRITE: return p.length==9 && b[0]<=200;
     case LANTERN: return p.length==19 && b[0]<=LANTERN_STATE_MAX && b[1]<=1 && get32(b+3)>=1;
     case PEDRO: return p.length==21 && b[0]<=2 && b[1]<=1 &&
       get16(b+2)<=180 && get16(b+4)<=180 && get16(b+6)<=180 && get16(b+8)<=180 &&
       b[10]<=1 && b[11]<=1 && b[12]<=1;
     case COMMAND: return p.flags==ACK_REQUIRED && strcmp(p.dst,"*") &&
-      ((p.length==11 && b[4]!=LANTERN_STATE && b[4]!=PEDRO_POSE) ||
+      ((p.length==11 && b[4]!=LANTERN_STATE && b[4]!=PEDRO_POSE &&
+        (b[4]!=LED || (get16(b+5)<=1 && get32(b+7)==0))) ||
        (p.length==15 && b[4]==LANTERN_STATE && get16(b+5)<=LANTERN_STATE_MAX && get32(b+7)>=1 && get32(b+7)<0xffffffff) ||
        (p.length==17 && b[4]==PEDRO_POSE && get16(b+5)<=2 && get32(b+7)<=30000 &&
         get16(b+11)<=180 && get16(b+13)<=180 && b[15]<=1 && b[16]<=1));
@@ -73,11 +76,12 @@ inline bool decode(const uint8_t* in, size_t n, Packet& p) {
   p.session=get32(in+38); p.seq=get32(in+42); memcpy(p.payload,in+HEADER,p.length);
   return shape(p);
 }
-inline uint8_t stream(const Packet& p) { return p.type==DIAGNOSTIC ? 9 : p.type==BUTTON ? p.payload[0] : 0; }
+// LED and servo commands must not supersede one another when radio delivery reorders them.
+inline uint8_t stream(const Packet& p) { return p.type==DIAGNOSTIC ? 9 : p.type==BUTTON ? p.payload[0] : p.type==COMMAND && p.payload[4]==LED ? 10 : 0; }
 struct PeerState {
   char id[16]={}; uint8_t mac[6]={}; uint32_t session=0, heard=0;
-  bool conflict=false, initialized[10]={}, seen=false,continuous=false;
-  uint32_t seq[10]={}, gaps=0,lastSeen=0;
+  bool conflict=false, initialized[11]={}, seen=false,continuous=false;
+  uint32_t seq[11]={}, gaps=0,lastSeen=0;
 };
 // Lifetime registry: fail closed at capacity; do not evict ordering/conflict evidence.
 struct Registry {

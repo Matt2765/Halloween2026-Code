@@ -1,5 +1,17 @@
 # Unified ESP-NOW installation and protocol v1
 
+## Dropdown extension
+
+The additive dropdown integration is documented in [dropdownNode/README.md](dropdownNode/README.md).
+Reflash the bridge and new dropdown node; existing nodes keep their wire formats.
+Type **11 dropdown** combines the 17-byte servo payload with button-pressed and
+LED-on bytes. Operation **7 LED** uses an 11-byte command (value 0/1, duration 0).
+USB adds `kind:"dropdown"` and `op:"led"`; RSM reuses `servo`, `get_servo_state`,
+and `get_button_value` and adds `led(device_id, on)`. Dropdown telemetry is one
+ordered snapshot; LED commands use separate ordering stream 10 and independent
+retry cancellation from servo commands. The powered node reports released as
+well as held states every two seconds; both expire to unknown at six seconds.
+
 ## Pedro extension
 
 The additive Pedro integration is documented in [pedroNode/README.md](pedroNode/README.md).

@@ -111,9 +111,11 @@ Code received(const Received& r) {
     case BUTTON:doc["kind"]="button"; vals["btn"]=b[0]; vals["pressed"]=bool(b[1]); vals["ready"]=true; break;
     case PIR:doc["kind"]="pir"; vals["output"]=bool(b[0]); vals["ready"]=bool(b[1]); break;
     case SERVO:
-      doc["kind"]="servo"; vals["output_angle"]=get16(b); vals["angle"]=get16(b); vals["target"]=get16(b+2);
+    case DROPDOWN:
+      doc["kind"]=p.type==DROPDOWN?"dropdown":"servo"; vals["output_angle"]=get16(b); vals["angle"]=get16(b); vals["target"]=get16(b+2);
       vals["moving"]=bool(b[4]); vals["us"]=get16(b+5); vals["command_session"]=get32(b+7); vals["command_seq"]=get32(b+11);
       if(get16(b+15)==0xffff) vals["measured_angle"]=nullptr; else vals["measured_angle"]=get16(b+15);
+      if(p.type==DROPDOWN) { vals["btn"]=1; vals["pressed"]=bool(b[17]); vals["led"]=bool(b[18]); }
       vals["ready"]=true; break;
     case SPRITE:
       doc["kind"]="sprite"; vals["index"]=b[0]; vals["command_session"]=get32(b+1); vals["command_seq"]=get32(b+5);
@@ -174,6 +176,7 @@ void usbLine(const char* line) {
   if(!strcmp(op,"next")) operation=NEXT;
   if(!strcmp(op,"lantern")) operation=LANTERN_STATE;
   if(!strcmp(op,"pedro")) operation=PEDRO_POSE;
+  if(!strcmp(op,"led")) operation=LED;
   if(!operation||!doc["value"].is<uint16_t>()||!doc["duration_ms"].is<uint32_t>()) {
     resultLine(cid,id,"rejected","invalid_command"); return;
   }
@@ -184,10 +187,12 @@ void usbLine(const char* line) {
     resultLine(cid,id,"rejected","invalid_pedro_pose"); return;
   }
   if((operation!=LANTERN_STATE && duration>30000) || ((operation==MOVE||operation==SET_DEFAULT)&&value>180) || (operation==PLAY&&value>200) ||
+     (operation==LED && (value>1 || duration!=0)) ||
      (operation==LANTERN_STATE && (value>LANTERN_STATE_MAX || duration<1 || duration==0xffffffff || !doc["sync_generation"].is<uint32_t>()))) {
     resultLine(cid,id,"rejected","out_of_range"); return;
   }
-  if(operation==MOVE||operation==SET_DEFAULT||operation==PEDRO_POSE) radio.cancel(id,SUPERSEDED);
+  if(operation==MOVE||operation==SET_DEFAULT||operation==PEDRO_POSE||operation==LED)
+    radio.cancel(id,SUPERSEDED,operation==SET_DEFAULT?MOVE:operation);
   Request* request=nullptr;
   for(auto& r:requests) if(!r.used) { request=&r; break; }
   if(!request) { resultLine(cid,id,"rejected","queue_full"); return; }

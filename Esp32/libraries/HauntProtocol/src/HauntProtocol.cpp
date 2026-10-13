@@ -57,8 +57,10 @@ bool Radio::send(const Packet& p) {
   stats.drops++; return false;
 }
 bool Radio::busy() const { for(auto& p:pending_) if(p.used) return true; return false; }
-void Radio::cancel(const char* destination,Code why) {
-  for(auto& p:pending_) if(p.used&&(!destination||!strcmp(destination,p.packet.dst))) {
+void Radio::cancel(const char* destination,Code why,uint8_t operation) {
+  for(auto& p:pending_) if(p.used&&(!destination||!strcmp(destination,p.packet.dst)) &&
+    (!operation || (p.packet.type==COMMAND && (p.packet.payload[4]==operation ||
+      (operation==MOVE && p.packet.payload[4]==SET_DEFAULT))))) {
     p.used=false; if(result_) result_(p.packet,why,millis()-p.began);
   }
 }

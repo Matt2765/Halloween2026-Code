@@ -125,7 +125,7 @@ def _store_device(shared, obj, now):
     session, seq = obj.get("session"), obj.get("seq")
     if not _valid_id(sid) or not _uint32(session) or not _uint32(seq) or not isinstance(vals, dict):
         raise ValueError("Invalid device identity or payload")
-    if kind not in ("tof", "button", "pir", "servo", "sprite", "lantern", "pedro"):
+    if kind not in ("tof", "button", "pir", "servo", "sprite", "lantern", "pedro", "dropdown"):
         raise ValueError("Unsupported device kind")
     if kind == "button" and (type(vals.get("btn")) is not int or not 1 <= vals["btn"] <= 8 or type(vals.get("pressed")) is not bool):
         raise ValueError("Invalid button state")
@@ -135,8 +135,11 @@ def _store_device(shared, obj, now):
         raise ValueError("Invalid TOF status")
     if kind == "tof" and vals["valid"] and (type(vals.get("dist_mm")) is not int or vals["dist_mm"] < 0 or vals["status"] != 0):
         raise ValueError("Invalid TOF measurement")
-    if kind == "servo" and (type(vals.get("output_angle")) is not int or not 0 <= vals["output_angle"] <= 180 or type(vals.get("moving")) is not bool):
+    if kind in ("servo", "dropdown") and (type(vals.get("output_angle")) is not int or not 0 <= vals["output_angle"] <= 180 or type(vals.get("moving")) is not bool):
         raise ValueError("Invalid servo output")
+    if kind == "dropdown" and (type(vals.get("btn")) is not int or vals["btn"] != 1 or
+                               type(vals.get("pressed")) is not bool or type(vals.get("led")) is not bool):
+        raise ValueError("Invalid dropdown button/LED state")
     if kind == "lantern" and (vals.get("lantern_state") not in LANTERN_STATES or
                               type(vals.get("synced")) is not bool or
                               type(vals.get("brightness")) is not int or not 0 <= vals["brightness"] <= 255 or
@@ -173,7 +176,7 @@ def _store_device(shared, obj, now):
     new = {"id": sid, "kind": kind, "session": session, "seq": seq,
            "mac": mac, "vals": vals, "t_host_ms": now, "fw": obj.get("fw"),
            "sequence_gaps": obj.get("sequence_gaps", 0)}
-    if kind == "button":
+    if kind in ("button", "dropdown"):
         buttons = dict(rec.get("buttons", {})) if rec else {}
         buttons[str(vals["btn"])] = {"seq": seq, "pressed": vals["pressed"], "t_host_ms": now}
         new["buttons"] = buttons
@@ -257,7 +260,7 @@ def _log_device_changes(previous, current, now, tof_events):
             state["blocked"] = False
             _log_event(f"{sid} cleared ({distance} mm)")
         tof_events[sid] = state
-    elif kind == "button":
+    elif kind in ("button", "dropdown"):
         index = str(vals["btn"])
         button = current["buttons"][index]
         if now - button["t_host_ms"] >= HELD_FRESH_MS:
@@ -432,7 +435,7 @@ def device_status(sensor_id):
         state = "unavailable"
     elif kind == "tof":
         state = "stale" if age > STALE_DEFAULT_MS else "valid" if vals.get("valid") else "invalid"
-    elif kind == "servo" and age > (1000 if vals.get("moving") else 6000):
+    elif kind in ("servo", "dropdown") and age > (1000 if vals.get("moving") else 6000):
         state = "stale"
     elif not vals.get("ready", True):
         state = "warming"
@@ -445,8 +448,10 @@ def get_button_value(device_id, btn_num=None):
     if _disabled:
         return False
     rec = get(device_id)
-    if not rec or rec.get("conflict") or rec.get("kind") != "button":
+    if not rec or rec.get("conflict") or rec.get("kind") not in ("button", "dropdown"):
         return None
+    if rec["kind"] == "dropdown" and _now_ms() - rec["t_host_ms"] >= DEVICE_FRESH_MS:
+        return None # Powered node: both pressed and released expire when disconnected.
     index = btn_num if btn_num is not None else rec["vals"]["btn"]
     button = rec.get("buttons", {}).get(str(index))
     if not button:
@@ -483,7 +488,7 @@ def get_pir_state(device_id):
 
 def get_servo_state(device_id):
     rec = get(device_id)
-    return dict(device_status(device_id), **(rec["vals"] if rec and rec["kind"] == "servo" else {}))
+    return dict(device_status(device_id), **(rec["vals"] if rec and rec["kind"] in ("servo", "dropdown") else {}))
 
 
 def get_lantern_state(device_id):
@@ -526,7 +531,11 @@ def tx_to_id(device_id, payload):
     payload = json.loads(payload) if isinstance(payload, str) else dict(payload)
     if any(payload.get(key, device_id) != device_id for key in ("id", "to")):
         raise ValueError("Conflicting logical destination")
-    if payload.get("cmd") == "pedro":
+    if payload.get("cmd") == "led":
+        if type(payload.get("on")) is not bool:
+            raise ValueError("LED on must be True or False")
+        op, value, duration = "led", int(payload["on"]), 0
+    elif payload.get("cmd") == "pedro":
         state = payload.get("state")
         if state not in PEDRO_STATES:
             raise ValueError(f"Pedro state must be one of {PEDRO_STATES}")
@@ -550,7 +559,7 @@ def tx_to_id(device_id, payload):
     elif payload.get("cmd", "play") == "play":
         op, value, duration = "play", payload.get("index", payload.get("file")), 0
     else:
-        raise ValueError("Supported commands: angle, set_default, play/index/file, next")
+        raise ValueError("Supported commands: angle, set_default, led, pedro, lantern, play/index/file, next")
     maximum = 2 if op == "pedro" else 180 if op in ("move", "set_default") else len(LANTERN_STATES) - 1 if op == "lantern" else 200
     duration_maximum = 0xfffffffe if op == "lantern" else 30000
     if type(value) is not int or not 0 <= value <= maximum or type(duration) is not int or not 0 <= duration <= duration_maximum:
@@ -573,6 +582,9 @@ def tx_to_id(device_id, payload):
             return cid
         request = {"v": 1, "type": "command", "host": connection["host"], "command_id": cid,
                    "id": device_id, "target_session": device["session"], "op": op, "value": value, "duration_ms": duration}
+        if op == "led" and device["kind"] != "dropdown":
+            _commands[cid] = dict(rec, status="rejected", reason="not_a_dropdown")
+            return cid
         if op == "pedro":
             if device["kind"] != "pedro":
                 _commands[cid] = dict(rec, status="rejected", reason="not_pedro")
@@ -605,6 +617,11 @@ def tx_to_mac(mac, payload):
 
 def servo(device_id, angle, ramp_ms=None):
     return tx_to_id(device_id, {"angle": max(0, min(180, int(angle))), "ramp_ms": 0 if ramp_ms is None else int(ramp_ms)})
+
+
+def led(device_id, on):
+    """Set dropdownNode's onboard indicator; return a command ID for command_status()."""
+    return tx_to_id(device_id, {"cmd": "led", "on": on})
 
 
 def sprite_play(device_id, index):
