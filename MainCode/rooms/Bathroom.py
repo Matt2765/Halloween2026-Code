@@ -30,8 +30,14 @@ def run():
             if BreakCheck():
                 break
 
+            test = input("servo angle:")
+            rsm.servo("DROPDOWN1", test)
+            rsm.led("DROPDOWN1", True)
+            wait(1)
+            rsm.led("DROPDOWN1", False)
+
             # Sequencing here
-            for i in range(5):
+            for i in range(1):
                 m1Digital_Write(33, 0)
                 wait(1)
                 m1Digital_Write(33, 1)
