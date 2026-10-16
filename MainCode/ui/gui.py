@@ -4,7 +4,7 @@ import threading
 from MainCode.rooms import CabinRoom, Bathroom, ShowerHallway, DynamicHallway, Basement, PalletHallway, ForestHallway
 from context import house
 from control.shutdown import shutdown
-from control.doors import setDoorState
+from control.doors import DOOR_SOLENOID_PINS, setDoorState
 from control.houseLights import toggleHouseLights
 from utils.tools import log_event
 
@@ -46,62 +46,68 @@ def MainGUI():
     root = tk.Tk()
     root.configure(background="orange")
     root.title("Halloween [year] Control Panel")
-    root.geometry("465x1080")
+    root.geometry("465x900")
 
-    tk.Label(root, text="MAINS", font=("Helvetica bold", 15), bg="orange").place(x=25, y=15)
-    tk.Label(root, text="DOOR CONTROLS", font=("Helvetica bold", 15), bg="orange").place(x=25, y=200)
-    tk.Label(root, text="DEMO CONTROLS", font=("Helvetica bold", 15), bg="orange").place(x=25, y=395)
+    # Let sections follow their requested height instead of leaving fixed gaps.
+    content = tk.Frame(root, bg="orange")
+    content.pack(fill="x", padx=16, pady=10)
+    control_font = ("Helvetica", -13)
+    heading_font = ("Helvetica bold", -17)
 
-    tk.Button(root, text="START HAUNTED HOUSE", height=3, width=25, bg="turquoise1",
-              command=lambda: threading.Thread(target=StartHouse, daemon=True, name="HOUSE").start()).place(x=250, y=50)
-    tk.Button(root, text="EMERGENCY SHUTOFF", height=3, width=25, bg="red",
-              command=lambda: change_system_state("EmergencyShutoff")).place(x=25, y=50)
-    tk.Button(root, text="SOFT SHUTDOWN", height=3, width=25, bg="yellow",
-              command=lambda: change_system_state("SoftShutdown")).place(x=25, y=125)
+    def section(title):
+        tk.Label(content, text=title, font=heading_font, bg="orange").pack(
+            anchor="w", pady=(4, 2))
+        frame = tk.Frame(content, bg="orange")
+        frame.pack(fill="x", pady=(0, 4))
+        return frame
 
-    tk.Button(root, text="Open Door 1", height=2, width=15,
-              command=lambda: setDoorState(1, "OPEN")).place(x=25, y=235)
-    tk.Button(root, text="Close Door 1", height=2, width=15,
-              command=lambda: setDoorState(1, "CLOSED")).place(x=150, y=235)
-    tk.Button(root, text="Open Door 2", height=2, width=15,
-              command=lambda: setDoorState(2, "OPEN")).place(x=25, y=285)
-    tk.Button(root, text="Close Door 2", height=2, width=15,
-              command=lambda: setDoorState(2, "CLOSED")).place(x=150, y=285)
+    def control(frame, text, command, row, column, bg=None, state="normal"):
+        frame.grid_columnconfigure(column, weight=1, uniform="controls")
+        options = {"bg": bg} if bg else {}
+        tk.Button(frame, text=text, font=control_font, height=1,
+                  command=command, state=state, **options).grid(
+            row=row, column=column, sticky="ew", padx=2, pady=2, ipady=3)
 
-    # DEMO CONTROLS (strip "rooms." prefix)
-    tk.Button(root, text=f"Demo {CabinRoom.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(CabinRoom.__name__.split('.')[-1])).place(x=25, y=430)
-    tk.Button(root, text=f"Demo {Bathroom.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Bathroom.__name__.split('.')[-1])).place(x=150, y=430)
-    tk.Button(root, text=f"Demo {ShowerHallway.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(ShowerHallway.__name__.split('.')[-1])).place(x=275, y=430)
-    tk.Button(root, text=f"Demo {DynamicHallway.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(DynamicHallway.__name__.split('.')[-1])).place(x=25, y=480)
-    tk.Button(root, text=f"Demo {Basement.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(Basement.__name__.split('.')[-1])).place(x=150, y=480)
-    tk.Button(root, text=f"Demo {PalletHallway.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(PalletHallway.__name__.split('.')[-1])).place(x=275, y=480)
-    tk.Button(root, text=f"Demo {ForestHallway.__name__.split('.')[-1]}", height=2, width=15,
-              command=lambda: demoEvent(ForestHallway.__name__.split('.')[-1])).place(x=25, y=530)
-    tk.Button(root, text="Start Pedro", height=2, width=15, font=("Helvetica", -14),
-              command=lambda: threading.Thread(target=start_pedro, daemon=True, name="Pedro start").start()).place(x=150, y=530)
-    tk.Button(root, text="Stop Pedro", height=2, width=15, font=("Helvetica", -14),
-              command=lambda: threading.Thread(target=stop_pedro, daemon=True, name="Pedro stop").start()).place(x=275, y=530)
+    mains = section("MAINS")
+    control(mains, "EMERGENCY SHUTOFF",
+            lambda: change_system_state("EmergencyShutoff"), 0, 0, "red")
+    control(mains, "START HAUNTED HOUSE",
+            lambda: threading.Thread(target=StartHouse, daemon=True, name="HOUSE").start(),
+            0, 1, "turquoise1")
+    control(mains, "SOFT SHUTDOWN",
+            lambda: change_system_state("SoftShutdown"), 1, 0, "yellow")
+    control(mains, "Toggle House Lights", toggleHouseLights, 1, 1, "chartreuse2")
 
-    tk.Button(root, text="Toggle House Lights", height=3, width=25, bg="chartreuse2",
-              command=toggleHouseLights).place(x=250, y=125)
+    doors = section("DOOR CONTROLS")
+    for i, door in enumerate(range(1, 7)):
+        row, column = i // 3, (i % 3) * 2
+        state = "normal" if door in DOOR_SOLENOID_PINS else "disabled"
+        control(doors, f"Open {door}",
+                lambda door=door: setDoorState(door, "OPEN"), row, column, state=state)
+        control(doors, f"Close {door}",
+                lambda door=door: setDoorState(door, "CLOSED"), row, column + 1, state=state)
+    unmapped = [str(door) for door in range(1, 7) if door not in DOOR_SOLENOID_PINS]
+    if unmapped:
+        tk.Label(doors, text=f"Doors {', '.join(unmapped)}: hardware mapping needed",
+                 font=control_font, bg="orange").grid(
+            row=2, column=0, columnspan=6, sticky="w", padx=2)
 
-    # -------------------------------------------------------------------------
-    # NEW: SENSOR + BUTTON STATUS PANEL (fits 465px width)
-    # -------------------------------------------------------------------------
-    SECTION_Y = 585
-    tk.Label(root, text="SENSORS & BUTTONS", font=("Helvetica bold", 15), bg="orange").place(x=25, y=SECTION_Y)
+    demos = section("DEMO CONTROLS")
+    for i, room in enumerate((CabinRoom, Bathroom, ShowerHallway, DynamicHallway,
+                              Basement, PalletHallway, ForestHallway)):
+        name = room.__name__.split('.')[-1]
+        control(demos, f"Demo {name}", lambda name=name: demoEvent(name), i // 3, i % 3)
+    control(demos, "Start Pedro",
+            lambda: threading.Thread(target=start_pedro, daemon=True, name="Pedro start").start(),
+            2, 1)
+    control(demos, "Stop Pedro",
+            lambda: threading.Thread(target=stop_pedro, daemon=True, name="Pedro stop").start(),
+            2, 2)
 
-    panel = tk.Frame(root, bg="orange")
-    panel.place(x=25, y=SECTION_Y + 30, width=415)  # <= keep within window
+    panel = section("SENSORS & BUTTONS")
 
     # Pixel-sized status fonts keep this panel within the fixed window at high DPI.
-    small = ("Helvetica", -14)
+    small = ("Helvetica", -13)
     status_heading = ("Helvetica bold", -17)
 
     # ===== Row group 1: TOF + Buttons + PIR =====
@@ -114,7 +120,7 @@ def MainGUI():
     tk.Label(tof_frame, text="TOF", font=small, bg="orange").grid(row=0, column=0, sticky="w", padx=(0, 10))
     tk.Label(tof_frame, text="Dist", font=small, bg="orange").grid(row=0, column=1, sticky="w")
 
-    tof_ids = ["TOF1", "TOF2", "TOF3", "TOF4", "TOF5"]
+    tof_ids = [f"TOF{i}" for i in range(1, 7)]
     tof_labels = {}
     for i, sid in enumerate(tof_ids, start=1):
         tk.Label(tof_frame, text=sid, font=small, bg="orange").grid(row=i, column=0, sticky="w", padx=(0, 10))
@@ -127,7 +133,7 @@ def MainGUI():
     btn_frame.grid(row=0, column=1, sticky="nw")
     tk.Label(btn_frame, text="Buttons", font=small, bg="orange").grid(row=0, column=0, columnspan=2, sticky="w")
 
-    btn_ids = ["BTN1", "BTN2", "BTN3", "BTN4"]
+    btn_ids = [f"BTN{i}" for i in range(1, 7)]
     btn_labels = {}
     for i, sid in enumerate(btn_ids, start=1):
         tk.Label(btn_frame, text=sid, font=small, bg="orange").grid(row=i, column=0, sticky="w", padx=(0, 6))
@@ -135,12 +141,12 @@ def MainGUI():
         lbl.grid(row=i, column=1, sticky="w")
         btn_labels[sid] = lbl
 
-    # PIR table: five nodes in their own sensors column.
+    # PIR table: six nodes in their own sensors column.
     pir_frame = tk.Frame(row1, bg="orange")
     pir_frame.grid(row=0, column=2, sticky="nw", padx=(10, 0))
     tk.Label(pir_frame, text="PIR", font=small, bg="orange").grid(
         row=0, column=0, columnspan=2, sticky="w")
-    pir_ids = ["PIR1", "PIR2", "PIR3", "PIR4", "PIR5"]
+    pir_ids = [f"PIR{i}" for i in range(1, 7)]
     pir_labels = {}
     for i, sid in enumerate(pir_ids, start=1):
         tk.Label(pir_frame, text=sid, font=small, bg="orange").grid(

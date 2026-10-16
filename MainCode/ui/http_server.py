@@ -132,6 +132,15 @@ WEBPAGE = '''<!doctype html>
 # SERVER HANDLER
 # ---------------------------------------------------------------------------
 class HalloweenHTTP(BaseHTTPRequestHandler):
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError):
+            # Browsers may close idle connections or leave before a response.
+            self.close_connection = True
+            if house.DEBUG_INFO:
+                log_event(f"[HTTP] Client disconnected: {self.client_address}")
+
     def do_GET(self):
         from control.system import StartHouse
         message = self.path

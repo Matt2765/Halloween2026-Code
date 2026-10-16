@@ -2,7 +2,7 @@
 using namespace haunt;
 // ===== PER-FLASH DEVICE CONFIGURATION =====
 const char* DEVICE_ID = "PIR1";
-constexpr int PIR_PIN = 27; // HC-SR501 OUT; common ground, module VCC from 5V
+constexpr int PIR_PIN = 13; // HC-SR501 OUT; common ground, module VCC from 5V
 constexpr uint32_t WARMUP_MS = 60000, STATUS_MS = 2000;
 // Network/retries: libraries/HauntProtocol/src/HauntConfig.h
 // ========================================

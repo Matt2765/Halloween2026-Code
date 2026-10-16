@@ -8,7 +8,7 @@ from collections import deque
 import serial
 from utils.tools import BreakCheck, log_event
 
-PORT = "COM7"
+PORT = "COM8"
 BAUD = 115200
 TIMEOUT = 0.10
 CHANNELS = 8
@@ -214,27 +214,37 @@ def clear_stop():
     _global_stop_evt.clear()
 
 
-def dim(value: float, *, channel: int = 1, force: bool = False) -> bool:
+def dim(value: float, *, channel: int = 1, force: bool = False,
+        fine: bool = False) -> bool:
     """Set one channel; False means duplicate or failed command.
 
     ACK pacing confirms the matching channel/value before caching it. Keepalive
     resends happen on calls to dim(), not in a background heartbeat.
+    fine=True uses microsecond DELAY commands for fractional brightness,
+    matching the UNO/Nano Schedule.h calibration (730..7883 us).
     """
     index = _channel_index(channel)
     pct = _percentage(value)
     value_int = int(round(pct))
+    command = f"SET {channel} {value_int}"
+    cache_key = value_int
+    if fine and pct > 0:
+        # Below 1%, hold the latest supported firing time; zero stays OFF.
+        delay_us = int(730 + (100 - max(1.0, pct)) * (7883 - 730) / 99)
+        command = f"DELAY {channel} {delay_us}"
+        cache_key = ("DELAY", delay_us)
     with _lock:
         if _board_reset.is_set():
             _last_sent_int[:] = [None] * CHANNELS
             _board_reset.clear()
         stale = time.monotonic() - _last_send_ok_ts[index] >= _KEEPALIVE_S
-        if not force and not stale and _last_sent_int[index] == value_int:
+        if not force and not stale and _last_sent_int[index] == cache_key:
             _current_pct[index] = pct
             return False
-        if not _command(f"SET {channel} {value_int}", f"ACK SET {channel} {value_int}"):
+        if not _command(command, f"ACK {command}"):
             return False
         _current_pct[index] = pct
-        _last_sent_int[index] = value_int
+        _last_sent_int[index] = cache_key
         _last_send_ok_ts[index] = time.monotonic()
         return True
 
@@ -243,6 +253,33 @@ def get_current_pct(channel: int = 1) -> float:
     """Last commanded percentage, not measured bulb output."""
     with _lock:
         return _current_pct[_channel_index(channel)]
+
+
+def start_glow(low: float, high: float, ramp_seconds: float, *, channel: int = 1) -> bool:
+    """Start an Arduino-timed repeating ramp; dim() on this channel stops it.
+
+    Requires the sketch's GLOW command. False allows a caller to use a Python
+    fallback with older firmware. The brightness cache is invalid during a glow.
+    """
+    index = _channel_index(channel)
+    low, high = sorted((_percentage(low), _percentage(high)))
+    if low < 1:
+        raise ValueError("glow endpoints must be at least 1 percent")
+    seconds = float(ramp_seconds)
+    if not math.isfinite(seconds) or not 0.05 <= seconds <= 65.535:
+        raise ValueError("ramp_seconds must be between 0.05 and 65.535")
+    low_delay = int(730 + (100 - low) * (7883 - 730) / 99)
+    high_delay = int(730 + (100 - high) * (7883 - 730) / 99)
+    ramp_ms = round(seconds * 1000)
+    command = f"GLOW {channel} {low_delay} {high_delay} {ramp_ms}"
+    stop_flicker(join=True, channel=channel)
+    with _lock:
+        # Invalidate even if the ACK is lost: the board may have started.
+        _last_sent_int[index] = None
+        if not _command(command, f"ACK {command}", wait=True):
+            return False
+        _current_pct[index] = low  # Initial level; autonomous output is not measured.
+        return True
 
 
 def all_off() -> bool:

@@ -6,6 +6,7 @@
 #include <string.h>
 #include "Schedule.h"
 #include "Demo.h"
+#include "Glow.h"
 
 #if !defined(__AVR_ATmega328P__) || F_CPU != 16000000UL
 #error "Select a classic 16 MHz ATmega328P UNO or Nano"
@@ -32,6 +33,8 @@ volatile uint32_t lastEdgeUs = 0;
 volatile uint16_t measuredHalfUs = 0;
 volatile uint16_t invalidEdges = 0, chatterEdges = 0, lostSync = 0;
 volatile uint16_t lateCycles = 0, maxLateTicks = 0;
+GlowRamp glows[8];
+uint32_t glowUpdateMs = 0;
 bool demoRunning = false;
 bool fireDemo = false;
 uint8_t demoPeak = DEFAULT_DEMO_PEAK;
@@ -134,6 +137,7 @@ void publishSchedule() {
 
 void stopOutputs() {
   demoRunning = false;
+  for (uint8_t i = 0; i < 8; ++i) glows[i].running = false;
   for (uint8_t i = 0; i < 8; ++i) requested[i] = OFF_DELAY;
   publishSchedule();
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { cancelEvents(); }
@@ -149,6 +153,19 @@ void updateDemo() {
     const uint8_t level = fireDemo ? fireDemoLevel(ch, now - demoStartMs, demoPeak)
                                   : demoLevel(ch, now - demoStartMs, demoPeak);
     const uint16_t delay = brightnessToDelayUs(level);
+    if (requested[ch] != delay) { requested[ch] = delay; changed = true; }
+  }
+  if (changed) publishSchedule();
+}
+
+void updateGlows() {
+  const uint32_t now = millis();
+  if (uint32_t(now - glowUpdateMs) < 5) return;
+  glowUpdateMs = now;
+  bool changed = false;
+  for (uint8_t ch = 0; ch < 8; ++ch) {
+    if (!glows[ch].running) continue;
+    const uint16_t delay = glows[ch].delayAt(now);
     if (requested[ch] != delay) { requested[ch] = delay; changed = true; }
   }
   if (changed) publishSchedule();
@@ -211,6 +228,28 @@ void handleLine(char *line) {
     return;
   }
   uint16_t ch, value;
+  if (!strcmp(cmd, "GLOW")) {
+    char *rampArg = strtok(nullptr, " \t");
+    char *tail = strtok(nullptr, " \t");
+    uint16_t lowDelay, highDelay, rampMs;
+    if (!parseNumber(arg1, ch) || ch < 1 || ch > 8 ||
+        !parseNumber(arg2, lowDelay) || !parseNumber(extra, highDelay) ||
+        !parseNumber(rampArg, rampMs) || tail || rampMs < 50 ||
+        lowDelay > MAX_DELAY_US || highDelay < MIN_DELAY_US || lowDelay < highDelay) {
+      Serial.println(F("ERR use GLOW ch low_delay_us high_delay_us ramp_ms (50..65535)"));
+      return;
+    }
+    demoRunning = false;
+    GlowRamp &glow = glows[ch - 1];
+    glow.lowDelay = lowDelay; glow.highDelay = highDelay; glow.rampMs = rampMs;
+    glow.startMs = millis(); glow.running = true;
+    requested[ch - 1] = lowDelay;
+    publishSchedule();
+    Serial.print(F("ACK GLOW ")); Serial.print(ch); Serial.print(' ');
+    Serial.print(lowDelay); Serial.print(' '); Serial.print(highDelay); Serial.print(' ');
+    Serial.println(rampMs);
+    return;
+  }
   // Legacy room/serial usage: SET value means channel 1.
   char firstChannel[] = "1";
   if (!strcmp(cmd, "SET") && arg1 && !arg2) { arg2 = arg1; arg1 = firstChannel; }
@@ -225,7 +264,10 @@ void handleLine(char *line) {
     return;
   }
   if (!strcmp(cmd, "ALL") && parseNumber(arg1, value) && value <= 100 && !arg2) {
-    for (uint8_t i = 0; i < 8; ++i) requested[i] = brightnessToDelayUs(value);
+    for (uint8_t i = 0; i < 8; ++i) {
+      glows[i].running = false;
+      requested[i] = brightnessToDelayUs(value);
+    }
   } else if ((!strcmp(cmd, "SET") || !strcmp(cmd, "DELAY")) &&
              parseNumber(arg1, ch) && ch >= 1 && ch <= 8 &&
              parseNumber(arg2, value) && !extra) {
@@ -233,6 +275,7 @@ void handleLine(char *line) {
     else if (!strcmp(cmd, "DELAY") && value >= MIN_DELAY_US && value <= MAX_DELAY_US)
       requested[ch - 1] = value;
     else { Serial.println(F("ERR range")); return; }
+    glows[ch - 1].running = false;
   } else {
     Serial.println(F("ERR use SET ch 0..100 | DELAY ch 350..7883 | ALL 0..100 | DEMO/DEMO2 [1..100] | STOP | OFF | INFO | PING"));
     return;
@@ -278,4 +321,5 @@ void loop() {
     }
   }
   updateDemo();
+  updateGlows();
 }

@@ -10,6 +10,9 @@ DOOR_SENSOR_IDS = {1: "PIR1", 2: "PIR2"}
 CLOSE_TRAVEL_S = 4
 CLOPEN_HOLD_S = 12
 SENSOR_POLL_S = 0.05
+# Continuous ready LOW required before starting/retrying a close. Verify this
+# against the installed HC-SR501's post-LOW blocking time; variants differ.
+PIR_CLEAR_WAIT_S = 3.0
 
 
 def setDoorState(id, state):
@@ -21,7 +24,6 @@ def setDoorState(id, state):
 
 
 def pir_blocks_close(id):
-    # HIGH includes the PIR's own ~3-second hold; don't add another cooldown.
     # Missing, warming, stale, or conflicted sensors also keep the door open.
     return (not rsm.healthy()["connected"] or
             rsm.get_pir_state(DOOR_SENSOR_IDS[id])["triggered"] is not False)
@@ -29,7 +31,7 @@ def pir_blocks_close(id):
 
 def door_process(id):
     pin = DOOR_SOLENOID_PINS[id]
-    closing_since = reopen_until = previous_target = None
+    closing_since = reopen_until = previous_target = clear_since = None
 
     def open_door():
         if house.DoorState.get(id) != "OPEN":
@@ -45,12 +47,14 @@ def door_process(id):
             now = t.monotonic()
             target = house.TargetDoorState.get(id, "OPEN")
             if target != previous_target:
+                clear_since = None
                 reopen_until = now + CLOPEN_HOLD_S if target == "CLOPEN" else None
                 previous_target = target
 
             if target != "CLOSED":
                 open_door()
                 closing_since = None
+                clear_since = None
                 if target == "CLOPEN" and now >= reopen_until:
                     if house.systemState == "ONLINE" and house.TargetDoorState.get(id) == "CLOPEN":
                         setDoorState(id, "CLOSED")
@@ -58,8 +62,12 @@ def door_process(id):
                 if pir_blocks_close(id):
                     open_door()
                     closing_since = None
+                    clear_since = None
                 elif closing_since is None:
-                    if house.systemState == "ONLINE" and house.TargetDoorState.get(id) == "CLOSED":
+                    if clear_since is None:
+                        clear_since = now
+                    if (now - clear_since >= PIR_CLEAR_WAIT_S and
+                            house.systemState == "ONLINE" and house.TargetDoorState.get(id) == "CLOSED"):
                         m1Digital_Write(pin, 0)
                         house.DoorState[id] = "CLOSING"
                         closing_since = now

@@ -151,8 +151,12 @@ A heartbeat proves the ESP is communicating, not that the sensing element works.
 LOW is not evidence that a door swing area is empty: PIR detects motion, not
 stationary occupancy. Door control now uses PIR1 for Door 1 and PIR2 for Door 2.
 Flash each PIR board with its own DEVICE_ID. HIGH holds the door open; a fresh,
-ready LOW allows a requested close. The hardware's roughly three-second HIGH
-hold supplies the delay; Python adds no extra cooldown. During the four-second
+ready LOW must remain continuously clear for `PIR_CLEAR_WAIT_S` (default three
+seconds in `MainCode/control/doors.py`) before a requested close starts. This
+wait covers the assumed post-LOW hardware blocking period, separately from the
+hardware HIGH hold time; verify the blocking time on the installed module and
+adjust the constant if needed. HIGH, unknown data, bridge loss, or a changed
+door target resets the wait. During the four-second
 closing travel, HIGH or unavailable data reopens the door. A completed close
 stays closed until another door command. CLOPEN opens for 12 seconds before
 requesting a close. Warm-up, stale data, conflicts and bridge loss prevent close.

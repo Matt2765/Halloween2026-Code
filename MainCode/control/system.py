@@ -62,6 +62,8 @@ def initialize_system():
         
         while house.systemState == "ONLINE":
             t.sleep(1)
+
+        stop_pedro()
         
         log_event("[System] All non-persistent services stopped. Most likely due to shutdown.")
             
@@ -79,6 +81,8 @@ def StartHouse():
         t.sleep(1)
         toggleHouseLights(False)
         setDoorState(2, "OPEN")
+
+        start_pedro("CabinRoom_Wall", gain=1)
 
         threading.Thread(
             target=CabinRoom.run, 

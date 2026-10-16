@@ -7,8 +7,7 @@ from control import dimmer_controller as dim
 # Define the pin numbers for the house lights followed by the digital value that determines their ON state.
 house_light_pins = {
     2: 0,
-    23: 0,
-    22: 1
+    28: 0,
 }
 
 def toggleHouseLights(enable: bool = None):
