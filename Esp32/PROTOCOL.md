@@ -129,6 +129,13 @@ The GUI's existing ID lists and new `PIR1` list are in `MainCode/ui/gui.py`.
 
 ## PIR wiring and interpretation
 
+`remotePIR` enables USB diagnostics with its local `SERIAL_DEBUG` setting.
+Open the PIR board's Serial Monitor at **115200 baud** and press EN/reset to
+see boot settings, radio initialization, GPIO transitions, warm-up status,
+and radio counters. Periodic `submit=OK` means local submission only;
+transition delivery `result=0` means the bridge acknowledged that packet.
+These firmware prints are independent of Python's `house.DEBUG_INFO` setting.
+
 Use module **VCC → regulated 5 V**, **GND → ESP32 GND**, and **OUT → GPIO27**.
 HC-SR501 supplier specifications identify a 5–20 V supply and a 3.3 V active-high
 output; the module's supply and output voltage are different. These electrical

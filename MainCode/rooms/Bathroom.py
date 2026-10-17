@@ -24,7 +24,6 @@ import random
 def run():
     global ambientLight
     log_event("[Bathroom] Starting...")
-    house.Bathroom_state = "ACTIVE"
 
     try:
         # Room startup here
@@ -36,13 +35,26 @@ def run():
             if BreakCheck():
                 break
 
+            house.Bathroom_state = "ACTIVE"
+
+            while not house.CabinRoom_state == "STANDBY":
+                wait(1)
+
             play_audio("Bathroom", "bathroomMusicPT1.wav", gain=.6)
 
             ambientLight = True
             threading.Thread(target=ambientGlow, daemon=True, name="Bathroom Ambient Glow").start()
             m1Digital_Write(31, 0) #magic light
 
-            wait(67) #voice over time
+            wait(62) #voice over time
+
+            rsm.lantern(4, "intense_flickering_on")
+
+            wait(2)
+
+            rsm.lantern(5, "intense_flicker_out")
+
+            wait(3)
 
             #mirror reveal
             ambientLight = False
@@ -90,8 +102,14 @@ def run():
 
             log_event("waiting...")
 
-            wait(30)
+            wait(12)
+            rsm.lantern(6, "flickering_on")
+
+            wait(90)
+
             m1Digital_Write(35, 1) #strobe
+
+            house.Bathroom_state = "STANDBY"
 
             if BreakCheck() or house.Demo:
                 if house.Demo:
@@ -148,7 +166,7 @@ def ambientFlicker():
                 value += 1
                 dim(value, channel=6)
                 t.sleep(.01)
-                log_event(value)
+                #log_event(value)
 
             if BreakCheck():
                 break
@@ -157,7 +175,7 @@ def ambientFlicker():
                 value -= 1
                 dim(value, channel=6)
                 t.sleep(.01)
-                log_event(value)
+                #log_event(value)
 
             if BreakCheck():
                 break
@@ -167,7 +185,7 @@ def ambientFlicker():
                     value -= 1
                     dim(value, channel=6)
                     t.sleep(.01)
-                    log_event(value)
+                    #log_event(value)
     finally:
         dim(0, channel=6)
 

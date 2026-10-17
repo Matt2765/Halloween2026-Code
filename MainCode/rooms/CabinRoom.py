@@ -22,16 +22,15 @@ import threading
 
 def run():
     log_event("[CabinRoom] Starting...")
-    house.CabinRoom_state = "ACTIVE"
 
     try:
         # Room startup here
-
         while house.HouseActive or house.Demo:
             if BreakCheck():
                 break
 
             # Sequencing here
+            house.CabinRoom_state = "ACTIVE"
 
             '''count = 0
             while not rsm.get_button_value("BTN2"):
@@ -44,8 +43,13 @@ def run():
 
             setDoorState(1, "CLOPEN")
 
-            play_audio("CabinRoom_Wall", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.2)
-            play_audio("CabinRoom_PA", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.2)
+            play_audio("CabinRoom_Wall", "cabinAmbienceShort.wav", gain=.3)
+            play_audio("CabinRoom_PA", "cabinAmbienceShort.wav", gain=.3)
+
+            wait(43)
+
+            play_audio("CabinRoom_Wall", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.4)
+            play_audio("CabinRoom_PA", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.4)
 
             wait(6)
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,5))
@@ -88,7 +92,9 @@ def run():
 
             rsm.lantern(3, "flickering_on")
 
-            wait(30)
+            house.CabinRoom_state = "STANDBY"
+
+            wait(300)
 
             if BreakCheck() or house.Demo:
                 if house.Demo:

@@ -1,4 +1,4 @@
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from MainCode.rooms import CabinRoom, Bathroom, ShowerHallway, DynamicHallway, Basement, PalletHallway, ForestHallway
 from control.doors import setDoorState
 from control.houseLights import toggleHouseLights
@@ -132,6 +132,9 @@ WEBPAGE = '''<!doctype html>
 # SERVER HANDLER
 # ---------------------------------------------------------------------------
 class HalloweenHTTP(BaseHTTPRequestHandler):
+    # Bound waits for idle/incomplete requests and stalled response readers.
+    timeout = 10
+
     def handle(self):
         try:
             super().handle()
@@ -142,7 +145,6 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
                 log_event(f"[HTTP] Client disconnected: {self.client_address}")
 
     def do_GET(self):
-        from control.system import StartHouse
         message = self.path
         log_event(f"[HTTP] Received request: {message}")
 
@@ -154,6 +156,7 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
             return
 
         elif message == "/START":
+            from control.system import StartHouse
             threading.Thread(target=StartHouse, daemon=True, name="HOUSE").start()
         elif message == "/PedroStart":
             if not start_pedro():
@@ -200,7 +203,8 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
 
 def HTTP_SERVER():
     log_event(f"[HTTP] Attempting to host server at http://{HOST}:{PORT}")
-    server = HTTPServer((HOST, PORT), HalloweenHTTP)
+    # Browsers pre-open sockets; one idle socket must not block other clients.
+    server = ThreadingHTTPServer((HOST, PORT), HalloweenHTTP)
     log_event(f"[HTTP] Server started at http://{HOST}:{PORT}")
     try:
         server.serve_forever()
