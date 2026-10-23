@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.client import HTTPConnection
 from pathlib import Path
 import socket
+import ssl
 import threading
 from types import SimpleNamespace
 import unittest
@@ -71,6 +72,14 @@ class HTTPServerTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertIn(b"Halloween Remote Control", body)
 
+    def test_status_endpoint_returns_json_without_hardware_actions(self):
+        import json
+        expected = {"system": "ONLINE", "doors": [{"id": 1, "state": "OPEN"}]}
+        self.scope["status_snapshot"] = lambda: expected
+        status, body = self.get("/api/status")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), expected)
+
     def test_slow_hardware_does_not_block_page_or_emergency(self):
         started, release = threading.Event(), threading.Event()
 
@@ -96,6 +105,21 @@ class HTTPServerTests(unittest.TestCase):
         with socket.create_connection(self.server.server_address, timeout=1) as client:
             client.sendall(b"GET / HTTP/1.0\r\nX-Incomplete:")
             self.assertEqual(client.recv(1024), b"")
+        self.assertEqual(self.get()[0], 200)
+
+    def test_https_handshake_is_rejected_promptly_with_useful_message(self):
+        messages = []
+        self.scope["log_event"] = messages.append
+        incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+        client_tls = ssl.create_default_context().wrap_bio(
+            incoming, outgoing, server_hostname="localhost")
+        with self.assertRaises(ssl.SSLWantReadError):
+            client_tls.do_handshake()
+        with socket.create_connection(self.server.server_address, timeout=1) as client:
+            client.sendall(outgoing.read())
+            self.assertEqual(client.recv(1024), b"")
+        self.assertTrue(any("HTTPS attempted" in message and "http://127.0.0.1:" in message
+                            for message in messages))
         self.assertEqual(self.get()[0], 200)
 
 

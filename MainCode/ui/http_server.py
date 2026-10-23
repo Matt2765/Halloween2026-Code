@@ -15,118 +15,32 @@ PORT = 9999
 # HTML PAGE CONTENT
 # ---------------------------------------------------------------------------
 WEBPAGE = '''<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>[year] Halloween Remote Control</title>
-  <style>
-    :root { --bg: #111; --panel: #1c1c1c; --text: #f5f5f5; --muted: #a0a0a0; --accent: #3b82f6; --warn: #f59e0b; --danger: #ef4444; --ok: #22c55e; --border: #2a2a2a; --shadow: 0 10px 18px rgba(0,0,0,.45); --radius: 18px; --gap: 12px; }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
-    header { background:#2b2b2b; position: sticky; top:0; z-index: 20; padding: 10px 16px; box-shadow: var(--shadow); font-weight: 700; }
-    main { padding: 16px; max-width: 760px; margin: 0 auto; }
-    .section { background: var(--panel); border:1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; box-shadow: var(--shadow); }
-    .row { display:flex; gap: var(--gap); flex-wrap: wrap; }
-    button { appearance: none; border: none; color: #fff; font-weight: 800; cursor: pointer; border-radius: 12px; padding: 16px 18px; min-width: 160px; flex: 1 1 220px; box-shadow: var(--shadow); transition: transform .06s ease, filter .12s ease, opacity .2s; }
-    button:active { transform: translateY(1px) scale(0.997); }
-    button[disabled] { opacity: .6; cursor: not-allowed; }
-    .btn-danger { background: var(--danger); }
-    .btn-primary { background: var(--accent); }
-    .btn-warn { background: var(--warn); color:#1a1a1a; }
-    .btn-secondary { background: #3a3a3a; }
-    h2 { margin: 0 0 10px; font-size: 14px; font-weight: 800; text-transform: uppercase; color: var(--muted); letter-spacing: .12em; }
-    .status { margin-top: 8px; font-size: 13px; color: var(--muted); display:flex; align-items:center; gap:8px; min-height: 22px; }
-    .dot { width:10px; height:10px; border-radius:50%; background:#444; display:inline-block; }
-    .dot.ok { background: var(--ok); }
-    .dot.err { background: var(--danger); }
-    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#000; padding:2px 6px; border-radius:6px; border:1px solid #2a2a2a; }
-    .hero { background: var(--panel); padding: 12px; border-radius: var(--radius); border: 1px solid var(--border); margin-bottom: 16px; box-shadow: var(--shadow); }
-    .hero .row button { flex: 1 1 100%; min-height: 64px; font-size: 18px; }
-    .hero .row button + button { flex: 1 1 calc(50% - var(--gap)); min-height: 58px; font-size: 16px; }
-    footer { text-align:center; color: #777; font-size: 12px; padding: 24px 12px; }
-    .small { font-size: 12px; color: var(--muted); }
-  </style>
-</head>
-<body>
-  <header>[year] Halloween Remote Control App</header>
-  <main>
-    <section class="hero">
-      <div class="row"><button class="btn-danger" data-endpoint="/EMERGENCY_SHUTOFF" data-confirm="true">EMERGENCY SHUTOFF</button></div>
-      <div class="row" style="margin-top:12px">
-        <button class="btn-primary" data-endpoint="/START">START HOUSE</button>
-        <button class="btn-warn" data-endpoint="/SOFT_SHUTDOWN">SOFT SHUTDOWN</button>
-      </div>
-      <div class="status" id="status-hero"><span class="dot" id="dot-hero"></span><span id="msg-hero">Ready</span></div>
-    </section>
-    <section class="section">
-      <h2>Manual Door Controls</h2>
-      <div class="row">
-        <button class="btn-secondary" data-endpoint="/Door1Open">Door 1 — OPEN</button>
-        <button class="btn-secondary" data-endpoint="/Door1Close">Door 1 — CLOSE</button>
-        <button class="btn-secondary" data-endpoint="/Door2Open">Door 2 — OPEN</button>
-        <button class="btn-secondary" data-endpoint="/Door2Close">Door 2 — CLOSE</button>
-      </div>
-      <div class="status"><span class="dot" id="dot-doors"></span><span id="msg-doors" class="small">No actions yet</span></div>
-    </section>
-    <section class="section">
-      <h2>House Lights</h2>
-      <div class="row"><button class="btn-secondary" data-endpoint="/ToggleHouseLights">Toggle House Lights</button></div>
-      <div class="status"><span class="dot" id="dot-lights"></span><span id="msg-lights" class="small">No actions yet</span></div>
-    </section>
-    <section class="section">
-      <h2>Pedro</h2>
-      <div class="row">
-        <button class="btn-primary" data-endpoint="/PedroStart">Start Pedro</button>
-        <button class="btn-secondary" data-endpoint="/PedroStop">Stop Pedro</button>
-      </div>
-      <div class="status"><span class="dot" id="dot-pedro"></span><span id="msg-pedro" class="small">No actions yet</span></div>
-    </section>
-    <section class="section">
-      <h2>Demo Controls</h2>
-      <div class="row">
-        <button class="btn-secondary" data-endpoint="/DemoCabinRoom">CabinRoom</button>
-        <button class="btn-secondary" data-endpoint="/DemoBathroom">Bathroom</button>
-        <button class="btn-secondary" data-endpoint="/DemoShowerHallway">ShowerHallway</button>
-        <button class="btn-secondary" data-endpoint="/DemoDynamicHallway">DynamicHallway</button>
-        <button class="btn-secondary" data-endpoint="/DemoBasement">Basement</button>
-        <button class="btn-secondary" data-endpoint="/DemoPalletHallway">PalletHallway</button>
-        <button class="btn-secondary" data-endpoint="/DemoForestHallway">ForestHallway</button>
-      </div>
-      <div class="status"><span class="dot" id="dot-demo"></span><span id="msg-demo" class="small">No actions yet</span></div>
-    </section>
-    <footer>Sends simple <span class="kbd">GET /path</span> requests to this server.</footer>
-  </main>
-  <script>
-    async function send(endpoint, section) {
-      const buttons = section.querySelectorAll('button');
-      buttons.forEach(b => b.disabled = true);
-      const dot = section.querySelector('.dot');
-      const msg = section.querySelector('[id^="msg-"]');
-      try {
-        if (navigator.vibrate) navigator.vibrate(10);
-        const res = await fetch(endpoint, { method: 'GET', cache: 'no-store' });
-        const ok = res.ok;
-        dot.classList.remove('err'); dot.classList.add('ok');
-        msg.textContent = ok ? `OK → ${endpoint}` : `HTTP ${res.status}`;
-      } catch (e) {
-        dot.classList.remove('ok'); dot.classList.add('err');
-        msg.textContent = `Failed → ${endpoint}`;
-      } finally { buttons.forEach(b => b.disabled = false); }
-    }
-    document.querySelectorAll('button[data-endpoint]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const endpoint = btn.dataset.endpoint;
-        const section = btn.closest('section');
-        if (btn.dataset.confirm === 'true') {
-          if (!confirm('Are you sure you want to trigger EMERGENCY SHUTOFF?')) return;
-        }
-        send(endpoint, section);
-      });
-    });
-  </script>
-</body>
-</html>'''
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Halloween Remote Control</title>
+<style>
+:root{color-scheme:light;--bg:orange;--panel:#ffb52b;--ink:#171717;--button:#eee;--line:#aa6900}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px Arial,sans-serif}body.dark{color-scheme:dark;--bg:#181818;--panel:#28231b;--ink:#fff0db;--button:#343434;--line:#815a20}header,main,nav{max-width:650px;margin:auto;padding:12px}header{display:flex;justify-content:space-between;align-items:center}h1{font-size:21px;margin:0}h2{font-size:16px;font-weight:500;margin:14px 0 9px}button{font:inherit;color:var(--ink);background:var(--button);border:1px solid var(--line);border-bottom-width:3px;border-radius:5px;min-height:48px;padding:10px;touch-action:manipulation}button:disabled{opacity:.45}button:focus-visible{outline:3px solid #0080ff}nav{display:flex;gap:6px;position:sticky;top:0;background:var(--bg);z-index:2}nav button{flex:1;min-width:0;padding:8px}nav button[aria-selected=true]{background:#171717;color:orange;border-color:orange}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.doors{display:block}.door-row{display:grid;grid-template-columns:1fr 82px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}.door-row strong{font-size:15px}.door-row small{font-size:12px;line-height:1.5;margin:2px 0}.door-row button{padding:6px 12px;min-height:40px;font-size:14px}.door-row .bypass{font-weight:bold}.red{background:red;color:white}.cyan{background:cyan;color:black}.yellow{background:yellow;color:black}.green{background:#80ee00;color:black}.card{padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:6px;margin:10px 0}.muted,small{font-size:12px}small{display:block;margin-top:5px}#connection{padding:0 12px;max-width:650px;margin:auto;font-size:13px}#notice{min-height:22px;margin:8px 0;font-size:14px}table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:9px 4px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}th{font-size:12px}section[hidden]{display:none}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px Arial}footer{padding:12px;text-align:center;font-size:12px}main{padding-top:0}#emergency{width:100%}
+</style><body><header><h1>HALLOWEEN CONTROL</h1><button id="theme" aria-label="Toggle dark mode">Dark mode</button></header><div id="connection" role="status">Connecting...</div>
+<nav aria-label="Control screens"><button data-tab="home" aria-selected="true">Mains</button><button data-tab="sensors">Sensors</button><button data-tab="demos">Demos</button><button data-tab="devices">Devices</button></nav>
+<main><button class="red" id="emergency" data-action="/EMERGENCY_SHUTOFF">EMERGENCY SHUTOFF</button><div id="notice" role="status" aria-live="polite"></div>
+<section id="home"><h2>MAINS</h2><div class="grid"><button class="cyan" data-action="/START">START HOUSE</button><button class="yellow" data-action="/SOFT_SHUTDOWN">SOFT SHUTDOWN</button><button class="green" data-action="/ToggleHouseLights" id="lights">House lights</button><button data-tab="sensors">View all sensors</button></div><h2>DOOR CONTROLS</h2><div class="grid doors" id="doors"></div><details><summary>One-time door overrides</summary><p class="muted">Force close ignores the sensor and clear delay for this movement.</p><div class="grid" id="forceDoors"></div></details><div class="card" id="overview"></div></section>
+<section id="sensors" hidden><h2>SENSORS & BUTTONS</h2><table><thead><tr><th>ID</th><th>TOF</th><th>BUTTON / AGE</th><th>PIR</th></tr></thead><tbody id="sensorRows"></tbody></table><div class="card" id="health"></div></section>
+<section id="demos" hidden><h2>ROOM DEMOS</h2><div class="grid" id="demoButtons"></div><h2>PEDRO</h2><div class="grid"><button data-action="/PedroStart">Start Pedro</button><button data-action="/PedroStop">Stop Pedro</button></div><div class="card" id="pedro"></div></section>
+<section id="devices" hidden><h2>SERVOS & DROPDOWN</h2><div id="servos"></div><h2>LANTERNS</h2><div id="lanterns"></div><h2>LAST COMMAND FAILURE</h2><pre class="card" id="failure"></pre></section></main>
+<script>
+const $=id=>document.getElementById(id);let state=null,busy=false,last=0;
+function theme(dark){document.body.classList.toggle('dark',dark);$('theme').textContent=dark?'Light mode':'Dark mode';try{localStorage.setItem('haunt-dark',dark)}catch{}}
+try{theme(localStorage.getItem('haunt-dark')==='true')}catch{}$('theme').onclick=()=>theme(!document.body.classList.contains('dark'));
+for(const room of ['CabinRoom','Bathroom','ShowerHallway','DynamicHallway','Basement','PalletHallway','ForestHallway']){const b=document.createElement('button');b.textContent=room;b.dataset.action='/Demo'+room;$('demoButtons').append(b)}
+for(let i=1;i<=6;i++){for(const action of ['Open','Close']){const b=document.createElement('button');b.textContent='Door '+i+' - Force '+action.toLowerCase();b.dataset.action='/ForceDoor'+i+action;$('forceDoors').append(b)}}
+function text(id,value){$(id).textContent=value}function card(parent,title,value){const d=document.createElement('div');d.className='card';d.textContent=title+' | '+value;$(parent).append(d)}
+function age(ms){return ms==null?'--':(ms/1000).toFixed(1)+'s'}
+function render(s){state=s;text('lights','Lights: '+(s.lights?'ON':'OFF')+' | Toggle');text('overview',s.system+' | House '+(s.active?'active':'idle'));text('pedro','Pedro '+(s.pedro.running?(s.pedro.connected?'running':'waiting for link'):'stopped')+' | '+s.pedro.channel+(s.pedro.error?' | '+s.pedro.error:''));$('doors').replaceChildren();for(const d of s.doors){const row=document.createElement('div');row.className='door-row';const info=document.createElement('div');const title=document.createElement('strong');title.textContent='Door '+d.id+' - '+d.state;const detail=document.createElement('small');detail.textContent='Target: '+d.target+' | '+d.sensor+': '+(d.pir?.available?(d.pir.output?'HIGH':'LOW')+(d.pir.ready?' ready':' warming'):d.pir?.state||'unavailable')+(d.bypass?' | BYPASS ACTIVE':'');info.append(title,detail);const button=document.createElement('button');const opening=d.target==='CLOSED'||d.state==='CLOSING';button.dataset.action='/Door'+d.id+(opening?'Open':'Close');button.textContent=opening?'Open':'Close';row.append(info,button);$('doors').append(row)}
+$('sensorRows').replaceChildren();for(let i=0;i<6;i++){const p=s.pirs[i],b=s.buttons[i],t=s.tofs[i];const row=document.createElement('tr');for(const v of [i+1,t.value==null?t.status.state:t.value+' mm',(b.value===true?'held':b.value===false?'sleep':'unknown')+' / '+age(b.status.age_ms),p.available?(p.output?'HIGH':'LOW')+(p.ready?' ready':' warming'):p.state]){const td=document.createElement('td');td.textContent=v;row.append(td)}$('sensorRows').append(row)}
+text('health',s.health.disabled?'RSM DISABLED':!s.health.connected?'Bridge unavailable':'Bridge connected'+(s.health.error?.message?' | Last USB warning: '+(s.health.error.message==='Oversized USB line'?'Discarded a serial message longer than 1,024 bytes':s.health.error.message):''));text('failure',s.failure?JSON.stringify(s.failure,null,2):'No command failure');
+$('servos').replaceChildren();for(const [id,v] of Object.entries(s.servos))card('servos',id,(v.output_angle==null||['stale','unavailable','conflict'].includes(v.state)?v.state:'PWM '+v.output_angle+' deg'+(v.moving?' | moving':''))+' / '+age(v.age_ms));$('lanterns').replaceChildren();for(const [id,v] of Object.entries(s.lanterns))card('lanterns',id,v.available&&v.lantern_state?v.lantern_state.replaceAll('_',' ')+' | '+(v.synced?'wait '+v.next_command_id:'free'):v.state);lock(false)}
+function lock(stale){document.querySelectorAll('[data-action]').forEach(b=>b.disabled=(busy&&b.id!=='emergency')||(stale&&b.id!=='emergency'))}
+async function poll(){try{const r=await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(4000)});if(!r.ok)throw Error();render(await r.json());last=Date.now();text('connection','Connected | updated '+new Date().toLocaleTimeString())}catch{text('connection','Disconnected | status is stale | reconnecting...');lock(true)}finally{setTimeout(poll,1000)}}
+document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.tab){for(const id of ['home','sensors','demos','devices'])$(id).hidden=id!==b.dataset.tab;document.querySelectorAll('nav button').forEach(x=>x.setAttribute('aria-selected',x.dataset.tab===b.dataset.tab));return}const endpoint=b.dataset.action;if(!endpoint)return;if(endpoint==='/EMERGENCY_SHUTOFF'&&!confirm('Trigger emergency shutoff?'))return;busy=true;lock(false);text('notice','Sending...');try{const r=await fetch(endpoint,{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!r.ok)throw Error('Server returned '+r.status);text('notice','Command received.')}catch(err){text('notice','No confirmation: command may have run. Check status before retrying.')}finally{busy=false;lock(Date.now()-last>5000)}});lock(true);poll();
+</script></body></html>'''
 
 # ---------------------------------------------------------------------------
 # SERVER HANDLER
@@ -135,9 +49,28 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
     # Bound waits for idle/incomplete requests and stalled response readers.
     timeout = 10
 
+    def log_request(self, code="-", size="-"):
+        # Live polling is expected traffic, not an operational event.
+        if self.path == "/api/status" and str(code) == "200":
+            return
+        super().log_request(code, size)
+
     def handle(self):
         try:
+            # Detect a TLS ClientHello before the HTTP parser waits for a newline
+            # or dumps binary handshake data as a malformed HTTP request.
+            if self.rfile.peek(1)[:1] == b'\x16':
+                address, port = self.connection.getsockname()[:2]
+                log_event(f"[HTTP] HTTPS attempted by {self.client_address[0]}; "
+                          f"open http://{address}:{port}/ explicitly. "
+                          "This port does not support HTTPS.")
+                self.close_connection = True
+                return
             super().handle()
+        except TimeoutError:
+            self.close_connection = True
+            if house.DEBUG_INFO:
+                log_event(f"[HTTP] Idle client timed out: {self.client_address}")
         except (ConnectionResetError, BrokenPipeError):
             # Browsers may close idle connections or leave before a response.
             self.close_connection = True
@@ -145,6 +78,16 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
                 log_event(f"[HTTP] Client disconnected: {self.client_address}")
 
     def do_GET(self):
+        if self.path == "/api/status":
+            import json
+            payload = json.dumps(status_snapshot()).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         message = self.path
         log_event(f"[HTTP] Received request: {message}")
 
@@ -170,6 +113,19 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
             house.systemState = "EmergencyShutoff"
         elif message == "/SOFT_SHUTDOWN":
             house.systemState = "SoftShutdown"
+        elif message.startswith("/ForceDoor"):
+            from control.doors import DOOR_SOLENOID_PINS
+            commands = {f"/ForceDoor{i}{action}": (i, state)
+                        for i in DOOR_SOLENOID_PINS
+                        for action, state in (("Open", "OPEN"), ("Close", "CLOSED"))}
+            if message not in commands:
+                self.send_error(404)
+                return
+            if house.systemState != "ONLINE":
+                self.send_error(409, "Door overrides require the system to be ONLINE")
+                return
+            door, state = commands[message]
+            setDoorState(door, state, bypass_sensor=True)
         elif message == "/Door1Open":
             setDoorState(1, "OPEN")
         elif message == "/Door1Close":
@@ -178,6 +134,22 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
             setDoorState(2, "OPEN")
         elif message == "/Door2Close":
             setDoorState(2, "CLOSED")
+        elif message == "/Door3Open":
+            setDoorState(3, "OPEN")
+        elif message == "/Door3Close":
+            setDoorState(3, "CLOSED")
+        elif message == "/Door4Open":
+            setDoorState(4, "OPEN")
+        elif message == "/Door4Close":
+            setDoorState(4, "CLOSED")
+        elif message == "/Door5Open":
+            setDoorState(5, "OPEN")
+        elif message == "/Door5Close":
+            setDoorState(5, "CLOSED")
+        elif message == "/Door6Open":
+            setDoorState(6, "OPEN")
+        elif message == "/Door6Close":
+            setDoorState(6, "CLOSED")
         elif message == "/ToggleHouseLights":
             toggleHouseLights()
         elif message == "/DemoCabinRoom":
@@ -199,6 +171,30 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
         self.send_header("Content-type", "text/html")
         self.end_headers()
         self.wfile.write(bytes(f"<html><body><h1>Received {message}</h1></body></html>", "utf-8"))
+
+
+def status_snapshot():
+    from control import remote_sensor_monitor as rsm
+    from control.doors import DOOR_SOLENOID_PINS, DOOR_SENSOR_IDS, DOOR_SENSOR_BYPASS
+    from control.pedro_service import pedro_status
+    return {
+        "system": house.systemState, "active": house.HouseActive,
+        "lights": house.houseLights, "pedro": pedro_status(),
+        "doors": [{"id": i, "state": house.DoorState.get(i, "UNKNOWN"),
+                   "target": house.TargetDoorState.get(i, "UNKNOWN"),
+                   "bypass": DOOR_SENSOR_BYPASS.get(i, False),
+                   "pir": rsm.get_pir_state(DOOR_SENSOR_IDS[i]),
+                   "sensor": DOOR_SENSOR_IDS.get(i, "unmapped")}
+                  for i in DOOR_SOLENOID_PINS],
+        "tofs": [{"value": rsm.get_value(f"TOF{i}", "dist_mm"),
+                  "status": rsm.device_status(f"TOF{i}")} for i in range(1, 7)],
+        "buttons": [{"value": rsm.get_button_value(f"BTN{i}"),
+                     "status": rsm.device_status(f"BTN{i}")} for i in range(1, 7)],
+        "pirs": [rsm.get_pir_state(f"PIR{i}") for i in range(1, 7)],
+        "servos": {i: rsm.get_servo_state(i) for i in ("DROPDOWN1", "SERVO1", "SERVO2")},
+        "lanterns": {f"LANTERN{i}": rsm.get_lantern_state(f"LANTERN{i}") for i in range(1, 5)},
+        "health": rsm.healthy(), "failure": rsm.command_failure(),
+    }
 
 
 def HTTP_SERVER():

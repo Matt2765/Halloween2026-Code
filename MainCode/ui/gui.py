@@ -79,7 +79,7 @@ def MainGUI():
     control(mains, "Toggle House Lights", toggleHouseLights, 1, 1, "chartreuse2")
 
     doors = section("DOOR CONTROLS")
-    for i, door in enumerate(range(1, 7)):
+    for i, door in enumerate(sorted(DOOR_SOLENOID_PINS)):
         row, column = i // 3, (i % 3) * 2
         state = "normal" if door in DOOR_SOLENOID_PINS else "disabled"
         control(doors, f"Open {door}",

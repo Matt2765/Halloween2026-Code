@@ -7,12 +7,15 @@ from control.audio_manager import play_audio, stop_all_audio
 from control.arduino import m1Digital_Write
 from utils.thread_diagnostics import dump_threads
 from control.pedro_service import stop_pedro
+from control.doors import DOOR_SOLENOID_PINS, apply_door_shutdown_state
 
 def shutdown():
     log_event("[Shutdown] Executing shutdown routine...")
 
     house.HouseActive = False
     house.testing = False
+    for door in DOOR_SOLENOID_PINS:
+        apply_door_shutdown_state(door)
     stop_pedro()
 
     def _dim_off(ch: int):
@@ -35,9 +38,6 @@ def shutdown():
     m1Digital_Write(26, 1); log_event("+120v Lanterns 1 (B) OFF")
     m1Digital_Write(24, 1); log_event("+120v Lanterns 2 (B) OFF")
     m1Digital_Write(28, 1); log_event("+120v Lightning (C) OFF")
-    m1Digital_Write(39, 1); log_event("+12v Door 1 Solenoid (E) OFF")
-    m1Digital_Write(41, 1); log_event("+12v Door 2 Solenoid (E) OFF")
-    m1Digital_Write(45, 1); log_event("+12v Door 3 Solenoid (E) OFF")
 
     # ---------------- Shower Hallway ----------------
     log_event("SHUTDOWN - Shower Hallway:")
@@ -52,7 +52,6 @@ def shutdown():
     m1Digital_Write(49, 1); log_event("+12v Laser Pneumatic 1 (D) OFF")
     m1Digital_Write(51, 1); log_event("+12v Laser Pneumatic 2 (D) OFF")
     m1Digital_Write(37, 1); log_event("+120v Strobe 5 (N) OFF")
-    m1Digital_Write(53, 1); log_event("+12v Door 6 Solenoid (D) OFF")
 
     # ---------------- Bathroom ----------------
     log_event("SHUTDOWN - Bathroom:")
@@ -60,8 +59,6 @@ def shutdown():
     m1Digital_Write(33, 1); log_event("+120v Mirror Light (F) OFF")
     m1Digital_Write(60, 1); log_event("Smoke Machine 1 (H) OFF")
     m1Digital_Write(31, 1); log_event("+120v Magic Light (F) OFF")
-    m1Digital_Write(38, 1); log_event("+12v Door 3 Solenoid (H) OFF")
-    m1Digital_Write(40, 1); log_event("+12v Door 5 Solenoid (H) OFF")
 
     # ---------------- Dynamic Hallway ----------------
     log_event("SHUTDOWN - Dynamic Hallway:")
