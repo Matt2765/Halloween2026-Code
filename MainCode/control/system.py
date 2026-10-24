@@ -13,12 +13,13 @@ from control.houseLights import toggleHouseLights
 from control import remote_sensor_monitor
 from ui.gui import MainGUI
 from ui.http_server import HTTP_SERVER
-from utils.tools import log_event, BreakCheck, wait
+from utils.tools import log_event, BreakCheck, wait, randMixedNum
 from control.doors import spawn_doors
 import control.dimmer_controller as dim
 from control.shutdown import shutdown
 from control.pedro_service import start_pedro, stop_pedro
 import random
+from control.arduino import m1Digital_Write
 
 def initialize_system():
     while True:
@@ -57,6 +58,7 @@ def initialize_system():
         log_event("[System] Initialization complete. System is ONLINE.")
             
         threading.Thread(target=shutdownDetector, daemon=True, name="Shutdown Detector").start()
+        threading.Thread(target=canLights, daemon=True).start()
         
         t.sleep(1)
         
@@ -78,9 +80,12 @@ def StartHouse():
 
         setDoorState(1, "CLOSED")
         setDoorState(2, "CLOSED")
+        setDoorState(3, "CLOSED")
+        setDoorState(4, "CLOSED")
+        setDoorState(6, "CLOSED")
         t.sleep(1)
         toggleHouseLights(False)
-        setDoorState(2, "OPEN")
+        setDoorState(5, "OPEN")
 
         start_pedro("CabinRoom_Wall", gain=1)
 
@@ -188,3 +193,11 @@ def noScareDetector(threaded=False):
     else:
         main()
         
+def canLights():
+    print("Starting can lights process...")
+    while house.systemState == "ONLINE":
+        m1Digital_Write(5, 0)
+        t.sleep(random.randint(1, 10))
+        m1Digital_Write(5, 1)
+        t.sleep(randMixedNum(.05, .2))
+    print("Can lights process terminated.")

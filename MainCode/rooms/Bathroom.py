@@ -38,7 +38,13 @@ def run():
             house.Bathroom_state = "ACTIVE"
 
             while not house.CabinRoom_state == "STANDBY":
-                wait(1)
+                if house.Demo:
+                    break
+
+                if house.HouseActive:
+                    wait(1)
+                else:
+                    break
 
             play_audio("Bathroom", "bathroomMusicPT1.wav", gain=.6)
 
@@ -46,7 +52,12 @@ def run():
             threading.Thread(target=ambientGlow, daemon=True, name="Bathroom Ambient Glow").start()
             m1Digital_Write(31, 0) #magic light
 
-            wait(62) #voice over time
+            wait(20)
+
+            setDoorState(3, "CLOSED")
+            setDoorState(4, "OPEN")
+
+            wait(42) #voice over time
 
             rsm.lantern(4, "intense_flickering_on")
 
@@ -105,7 +116,11 @@ def run():
             wait(12)
             rsm.lantern(6, "flickering_on")
 
-            wait(90)
+            setDoorState(5, "OPEN")
+
+            wait(10)
+
+            house.Basement_state = "ACTIVE"
 
             m1Digital_Write(35, 1) #strobe
 
@@ -119,6 +134,9 @@ def run():
                 break
 
             t.sleep(0.1)
+
+            while not house.CabinRoom_state == "ACTIVE":
+                wait(1)
     finally:
         house.Bathroom_state = "INACTIVE"
         log_event("[Bathroom] Exiting.")

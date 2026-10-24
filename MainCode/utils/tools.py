@@ -3,6 +3,7 @@ import time
 import os
 from context import house
 import inspect, threading
+import random
 
 def wait(duration):
     end_time = time.monotonic() + duration
@@ -43,6 +44,9 @@ def log_event(message, logfile="logs/haunt_log.txt"):
     os.makedirs(os.path.dirname(logfile), exist_ok=True)
     with open(logfile, "a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+def randMixedNum(min, max):
+    return round(random.uniform(min, max), 2)
 
 def BreakCheck():
     if not house.HouseActive or house.systemState != "ONLINE":

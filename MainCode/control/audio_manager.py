@@ -148,6 +148,14 @@ class PlaybackHandle:
 _Session = PlaybackHandle  # Preserve internal/session compatibility.
 
 
+def _disabled_playback() -> PlaybackHandle:
+    """Return an already finished handle so callers can still wait or stop."""
+    session = PlaybackHandle(0, "audio manager disabled")
+    session.cancelled = True
+    session.done.set()
+    return session
+
+
 _active_sessions: list[_Session] = []
 
 def text_to_wav(text: str, path: Path, rate: int = 0) -> None:
@@ -699,6 +707,9 @@ def initialize_audio() -> None:
     PortAudio/WASAPI device creation is more reliable on the process's main
     thread. Playback remains thread-safe after these streams are running.
     """
+    if house.DISABLE_AUDIO_MANAGER:
+        log_event("[Audio] Audio manager disabled; output devices will not be opened.")
+        return
     log_event(f"[Audio] Initializing persistent mixers on {threading.current_thread().name}")
     for kind in cast(tuple[DeviceKind, DeviceKind], ("primary", "secondary")):
         try:
@@ -801,6 +812,8 @@ def _submit(
     force_cached: bool = False,
     deduplicate: bool = True,
 ) -> PlaybackHandle:
+    if house.DISABLE_AUDIO_MANAGER:
+        return _disabled_playback()
     session = _Session(_next_epoch(), f"{path.name}@{name or 'all'}")
     if mode == "all":
         kind: DeviceKind = "primary"
@@ -868,6 +881,8 @@ def play_to_named_channel(
     deduplicate: bool = True,
 ) -> PlaybackHandle:
     """Play a WAV on one configured mono or stereo named route."""
+    if house.DISABLE_AUDIO_MANAGER:
+        return _disabled_playback()
     path = _resolve_sound_path(wav_file, base_folder or DEFAULT_SOUND_DIR)
     if not path.exists():
         raise FileNotFoundError(path)
@@ -882,6 +897,8 @@ def play_to_named_channel(
 
 def _speak(text: str, name: str | None, gain: float, rate: int) -> None:
     """Prepare the mixer now, synthesize and submit speech in a worker."""
+    if house.DISABLE_AUDIO_MANAGER:
+        return
     kind: DeviceKind = "primary" if name is None else _resolve_named_target(name)[0]
     _mixer(kind)
 
@@ -922,6 +939,8 @@ def play_to_all_channels(
     deduplicate: bool = True,
 ) -> PlaybackHandle | None:
     """Play a WAV, or speak text, on every channel of the primary output."""
+    if house.DISABLE_AUDIO_MANAGER:
+        return _disabled_playback()
     base = Path(base_folder) if base_folder else DEFAULT_SOUND_DIR
     path = _resolve_sound_path(wav_or_text, base)
     gain = 1 if gain_override is None else gain_override
@@ -955,6 +974,8 @@ def play_audio(
     intentionally ignores break/shutdown requests. File playback returns a
     handle with `done`, `cancelled` and `stop()`; callers may ignore it as before.
     """
+    if house.DISABLE_AUDIO_MANAGER:
+        return _disabled_playback()
     if maybe_file:
         if target_or_text.lower() == "all":
             return play_to_all_channels(

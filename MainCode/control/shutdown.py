@@ -34,15 +34,16 @@ def shutdown():
     log_event("SHUTDOWN - Cabin Room:")
     m1Digital_Write(43, 1); log_event("+12v Air Blast 1 (E) OFF")
     m1Digital_Write(47, 1); log_event("+12v Air Blast 2 (B) OFF")
-    m1Digital_Write(22, 1); log_event("+120v Strobe 1 (B) OFF")
+    m1Digital_Write(22, 0); log_event("+120v Strobe 1 (B) OFF")
     m1Digital_Write(26, 1); log_event("+120v Lanterns 1 (B) OFF")
     m1Digital_Write(24, 1); log_event("+120v Lanterns 2 (B) OFF")
     m1Digital_Write(28, 1); log_event("+120v Lightning (C) OFF")
+    m1Digital_Write(5, 1); log_event("+120v Porch Lights (G) OFF")
 
     # ---------------- Shower Hallway ----------------
     log_event("SHUTDOWN - Shower Hallway:")
-    m1Digital_Write(30, 1); log_event("+120v Ambient Light 1 (M) OFF")
-    m1Digital_Write(32, 1); log_event("+120v Strobe 1 (M) OFF")
+    m1Digital_Write(30, 1); log_event("+120v Ambient Light 7 (M) OFF")
+    m1Digital_Write(32, 1); log_event("+120v Strobe 4 (M) OFF")
     m1Digital_Write(34, 1); log_event("+120v Shower Light (M) OFF")
     m1Digital_Write(36, 1); log_event("+120v Lanterns (M) OFF")
 
@@ -50,8 +51,9 @@ def shutdown():
     log_event("SHUTDOWN - Basement:")
     m1Digital_Write(61, 1); log_event("Smoke Machine 3 (N) OFF")
     m1Digital_Write(49, 1); log_event("+12v Laser Pneumatic 1 (D) OFF")
-    m1Digital_Write(51, 1); log_event("+12v Laser Pneumatic 2 (D) OFF")
     m1Digital_Write(37, 1); log_event("+120v Strobe 5 (N) OFF")
+    m1Digital_Write(4, 1); log_event("+120v Lightning Strip (D) OFF")
+    m1Digital_Write(3, 1); log_event("+120v Spotlight (D) OFF")
 
     # ---------------- Bathroom ----------------
     log_event("SHUTDOWN - Bathroom:")
