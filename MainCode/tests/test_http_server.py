@@ -8,6 +8,10 @@ import ssl
 import threading
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
+from types import ModuleType
+import sys
+import json
 
 
 def load_server():
@@ -79,6 +83,33 @@ class HTTPServerTests(unittest.TestCase):
         status, body = self.get("/api/status")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), expected)
+
+    def test_test_catalog_and_post_validation(self):
+        module = ModuleType("control.web_tests")
+        module.catalog = lambda: {"relays": [{"id": "cabin_strobe"}]}
+        seen = []
+        def execute(request):
+            seen.append(request)
+            if request.get("kind") == "invalid":
+                raise ValueError("Unknown test control")
+            return {"message": "Command sent"}
+        module.execute = execute
+        with patch.dict(sys.modules, {"control.web_tests": module}):
+            status, body = self.get("/api/tests")
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body), module.catalog())
+            for request, expected in (({"kind":"relay", "id":"cabin_strobe", "value":True},200),
+                                      ({"kind":"invalid"},400)):
+                connection = HTTPConnection(*self.server.server_address, timeout=1)
+                try:
+                    connection.request("POST", "/api/tests", body=json.dumps(request),
+                                       headers={"Content-Type":"application/json"})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, expected)
+                    self.assertIsInstance(json.loads(response.read()), dict)
+                finally:
+                    connection.close()
+            self.assertEqual(seen[0]["id"], "cabin_strobe")
 
     def test_slow_hardware_does_not_block_page_or_emergency(self):
         started, release = threading.Event(), threading.Event()

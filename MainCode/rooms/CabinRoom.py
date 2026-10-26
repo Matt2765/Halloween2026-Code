@@ -134,6 +134,8 @@ def run():
             house.CabinRoom_state = "STANDBY"
 
             while not house.Basement_state == "ACTIVE":
+                if not house.HouseActive or house.Demo:
+                    break
                 wait(1)
 
             m1Digital_Write(22, 0) #strobe off

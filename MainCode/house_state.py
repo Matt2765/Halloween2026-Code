@@ -6,8 +6,6 @@ class HouseState:
         self.systemState = "OFFLINE"
         self.Demo = False
         self.SOUND = True
-        # Set True before startup to leave audio output devices free for music.
-        # Restart the application after changing this setting.
         self.DISABLE_AUDIO_MANAGER = False
         self.testing = False
         self.houseLights = True
