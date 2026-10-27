@@ -12,9 +12,7 @@ import threading
 # setDoorState(1, "OPEN")           # "CLOSED" / "CLOPEN" also supported
 # play_audio("ShowerHallway", "Hit.wav", gain=1)  # threaded=True / looping=True
 # if BreakCheck(): return
-# while not rsm.obstructed("TOF2", block_mm=800, window_ms=250, min_consecutive=2):
-#     if BreakCheck(): return
-#     t.sleep(0.05)
+# distance_mm = rsm.get_TOF_value("TOF2")  # Millimeters; None if unavailable/stale
 # log_event("[ShowerHallway] Effect...")
 # toggleHouseLights(True)  # False = OFF
 # threading.Thread(target=function_name, daemon=True, name="ShowerHallway effect").start()
@@ -31,6 +29,17 @@ def run():
                 break
 
             # Sequencing here
+
+            while not rsm.get_button_value("BTN1"):
+                if house.Demo:
+                    break
+                t.sleep(.1)
+                if BreakCheck():
+                    break
+
+            play_audio("Shower_Hallway", "PZ-jumpscare2.wav", gain=1)
+
+            wait(10)  # 10s elapsed
 
             if BreakCheck() or house.Demo:
                 if house.Demo:

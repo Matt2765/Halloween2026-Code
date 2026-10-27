@@ -14,9 +14,7 @@ import random
 # setDoorState(1, "OPEN")           # "CLOSED" / "CLOPEN" also supported
 # play_audio("Bathroom", "Hit.wav", gain=1)  # threaded=True / looping=True
 # if BreakCheck(): return
-# while not rsm.obstructed("TOF2", block_mm=800, window_ms=250, min_consecutive=2):
-#     if BreakCheck(): return
-#     t.sleep(0.05)
+# distance_mm = rsm.get_TOF_value("TOF2")  # Millimeters; None if unavailable/stale
 # log_event("[Bathroom] Effect...")
 # toggleHouseLights(True)  # False = OFF
 # threading.Thread(target=function_name, daemon=True, name="Bathroom effect").start()
@@ -42,7 +40,7 @@ def run():
                     break
 
                 if house.HouseActive:
-                    wait(1)
+                    wait(1)  # 1 second polling interval until Cabin Room is STANDBY
                 else:
                     break
 
@@ -52,20 +50,20 @@ def run():
             threading.Thread(target=ambientGlow, daemon=True, name="Bathroom Ambient Glow").start()
             m1Digital_Write(31, 0) #magic light
 
-            wait(20)
+            wait(20)  # 20s elapsed
 
             setDoorState(3, "CLOSED")
             setDoorState(4, "OPEN")
 
-            wait(42) #voice over time
+            wait(42)  # 62s elapsed; voice over time
 
             rsm.lantern(4, "intense_flickering_on")
 
-            wait(2)
+            wait(2)  # 64s elapsed
 
             rsm.lantern(5, "intense_flicker_out")
 
-            wait(3)
+            wait(3)  # 67s elapsed
 
             #mirror reveal
             ambientLight = False
@@ -74,7 +72,7 @@ def run():
             m1Digital_Write(33, 0) #mirror light
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1, threaded=True)
 
-            wait(11.5) #bloody mary stare
+            wait(11.5)  # 78.5s elapsed; bloody mary stare
 
             m1Digital_Write(35, 0) #strobe
 
@@ -90,11 +88,11 @@ def run():
 
             m1Digital_Write(33, 1) #mirror light
 
-            wait(6.5) #victim performance
+            wait(6.5)  # 85s elapsed; victim performance
 
             m1Digital_Write(35, 1) #strobe
 
-            wait(4.5) #victim performance
+            wait(4.5)  # 89.5s elapsed; victim performance
 
             m1Digital_Write(35, 0) #strobe
 
@@ -113,12 +111,14 @@ def run():
 
             log_event("waiting...")
 
-            wait(12)
+            wait(12)  # 101.5s elapsed
             rsm.lantern(6, "flickering_on")
 
             setDoorState(5, "OPEN")
 
-            wait(10)
+            dim(25, channel=5) #dynamic hallway orange
+
+            wait(10)  # 111.5s elapsed
 
             house.Basement_state = "ACTIVE"
 
@@ -136,7 +136,7 @@ def run():
             t.sleep(0.1)
 
             while not house.CabinRoom_state == "ACTIVE":
-                wait(1)
+                wait(1)  # 1s polling interval until Cabin Room is ACTIVE
     finally:
         house.Bathroom_state = "INACTIVE"
         log_event("[Bathroom] Exiting.")

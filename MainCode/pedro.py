@@ -234,7 +234,7 @@ def choose_quip(files, previous, rng=random):
 
 class PedroShow:
     """Restartable show using the shared RSM and audio manager in this process."""
-    def __init__(self, channel="CabinRoom_Wall", *, gain=None,
+    def __init__(self, channel="Pedro", *, gain=None,
                  quips=ASSETS / "SoundDir" / "Quips", background=None,
                  background_channel=None, background_gain=0.89, interval=(10, 15),
                  device_id="PEDRO1", simulate=False, once=False,
@@ -337,7 +337,7 @@ def main(argv=None):
     parser.add_argument("--port", default="COM6", help="Existing USB transceiver, NOT Pedro's USB port")
     parser.add_argument("--device-id", default="PEDRO1")
     parser.add_argument("--quips", type=Path, default=ASSETS / "SoundDir" / "Quips")
-    parser.add_argument("--channel", default="CabinRoom_Wall", help="Named audio-manager route, as in play_audio")
+    parser.add_argument("--channel", default="Pedro", help="Named audio-manager route, as in play_audio")
     parser.add_argument("--gain", type=float, default=None, help="Defaults to the named channel's configured gain")
     parser.add_argument("--background", type=Path, default=None, help="Optional ambience file")
     parser.add_argument("--background-channel", default=None, help="Defaults to the voice channel")

@@ -60,12 +60,23 @@ class WebTestControlsTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.execute('dimmer',1,20)
         self.dim.dim.assert_not_called()
 
-    def test_tests_require_idle_online_house(self):
-        for attr, value in [('systemState','EmergencyShutoff'),('HouseActive',True),('Demo',True)]:
-            house=self.scope['house']; old=getattr(house,attr); setattr(house,attr,value)
-            with self.assertRaises(RuntimeError): self.execute('relay','cabin_air1',True)
-            setattr(house,attr,old)
+    def test_tests_require_online_house(self):
+        self.scope['house'].systemState = 'EmergencyShutoff'
+        with self.assertRaises(RuntimeError):
+            self.execute('relay', 'cabin_air1', True)
         self.arduino.M1.digital_write.assert_not_called()
+
+    def test_tests_allow_running_house_and_demo(self):
+        house = self.scope['house']
+        for active, demo in [(True, False), (False, True), (True, True)]:
+            with self.subTest(active=active, demo=demo):
+                house.HouseActive, house.Demo = active, demo
+                for value in (True, False):
+                    self.execute('relay', 'cabin_air1', value)
+                    self.arduino.M1.digital_write.assert_called_with(43, 0 if value else 1)
+                self.execute('dimmer', 7, 40)
+                self.dim.dim.assert_called_with(40, channel=7, force=True)
+                self.assertEqual((house.HouseActive, house.Demo), (active, demo))
 
     def test_servo_limits_and_remote_rejection(self):
         self.execute('servo','DROPDOWN1',90)

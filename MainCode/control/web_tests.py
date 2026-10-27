@@ -18,18 +18,20 @@ RELAYS = [
     ("cabin_lantern2", "Cabin Room", "Wall lanterns 2", 24, 0),
     ("cabin_lightning", "Cabin Room", "Lightning", 28, 0),
     ("cabin_porch", "Cabin Room", "Porch lights", 5, 0),
+    ("cabin_fire", "Cabin Room", "Fire light", 6, 0),
     ("bath_strobe", "Bathroom", "Strobe", 35, 0),
     ("bath_mirror", "Bathroom", "Mirror light", 33, 0),
     ("bath_magic", "Bathroom", "Magic light", 31, 0),
-    ("bath_smoke", "Bathroom", "Smoke machine 1", 60, 0),
     ("shower_ambient", "Shower Hallway", "Ambient light", 30, 0),
     ("shower_strobe", "Shower Hallway", "Strobe", 32, 0),
     ("shower_light", "Shower Hallway", "Shower light", 34, 0),
     ("shower_lanterns", "Shower Hallway", "Lanterns", 36, 0),
     ("basement_smoke", "Basement", "Smoke machine 3", 61, 0),
-    ("basement_laser", "Basement", "Laser pneumatic", 49, 0),
+    ("basement_shrine", "Basement", "Shrine solenoid", 49, 0),
     ("basement_strobe", "Basement", "Strobe", 37, 0),
-    ("basement_strip", "Basement", "Lightning strip", 4, 0),
+    ("dynamic_strip", "Dynamic Hallway", "Lightning strip", 4, 0),
+    ("dynamic_strobe", "Dynamic Hallway", "Strobe", 7, 0),
+    ("dynamic_lanterns", "Dynamic Hallway", "Lanterns", 23, 0),
     ("basement_spot", "Basement", "Spotlight", 3, 0),
     ("pallet_strobe", "Pallet Hallway", "Strobe", 29, 0),
     ("pallet_backlight", "Pallet Hallway", "Pallet backlight", 27, 0),
@@ -38,13 +40,24 @@ RELAYS = [
 ]
 DIMMERS = [
     (1, "Cabin Room", "Ambient light"), (2, "Cabin Room", "Grandma light"),
-    (3, "Cabin Room", "Fire light"), (4, "Dynamic Hallway", "Ambient light 1"),
+    (3, "Basement", "Wall crack lights"), (4, "Dynamic Hallway", "Ambient light 1"),
     (5, "Dynamic Hallway", "Ambient light 2"), (6, "Bathroom", "Ambient light"),
     (7, "Basement", "Ambient light"), (8, "Pallet Hallway", "Ambient lights"),
 ]
-UNMAPPED = ["Cabin chimney smoke machine: no pin assigned",
-            "Dynamic Hallway blacklights, lanterns and smoke machine: no pins assigned",
-            "Forest Hallway lasers, smoke, strobe and prop drop: no control mapping assigned"]
+UNASSIGNED_CONTROLS = [
+    ("Cabin Room", "Chimney smoke machine", "Cable G, red/black; Arduino pin needed"),
+    ("Bathroom", "Mirror servo", "Servo device ID needs to be assigned"),
+    ("Dynamic Hallway", "Blacklights", "Cable I, red; Arduino pin needed"),
+    ("Dynamic Hallway", "Smoke machine 2", "Cable J, red/black; Arduino pin needed"),
+    ("Forest Hallway", "Lasers", "ESP32 MOSFET; device ID and command mapping needed"),
+    ("Forest Hallway", "Smoke machine 6", "Cable P, red/black; Arduino pin needed"),
+    ("Forest Hallway", "Strobe", "Cable P, yellow; Arduino pin needed"),
+    ("Forest Hallway", "Prop drop", "Cable P, blue; Arduino pin needed"),
+    ("Graveyard", "Wendigo", "Device/pin and command mapping needed"),
+]
+UNMAPPED = [f"{room}: {label} - {detail}" for room, label, detail in UNASSIGNED_CONTROLS]
+DOOR_ROOMS = {1: "Cabin Room", 2: "Cabin Room", 3: "Bathroom",
+              4: "Cabin Room", 5: "Basement", 6: "Bathroom"}
 _lock = threading.RLock()
 
 
@@ -55,11 +68,13 @@ def catalog():
     return dict(
         relays=[dict(id=k, room=r, label=l, pin=p) for k, r, l, p, _ in RELAYS],
         dimmers=[dict(id=c, room=r, label=l) for c, r, l in DIMMERS],
-        doors=[dict(id=i, sensor=DOOR_SENSOR_IDS[i]) for i in DOOR_SOLENOID_PINS],
+        doors=[dict(id=i, sensor=DOOR_SENSOR_IDS[i], room=DOOR_ROOMS.get(i, "Doors"))
+               for i in DOOR_SOLENOID_PINS],
         servos=["DROPDOWN1", "SERVO1", "SERVO2"],
         lanterns=[f"LANTERN{i}" for i in range(1, 7)],
         lantern_modes=list(rsm.LANTERN_STATES),
         speakers=list(list_named_channels()), unmapped=UNMAPPED,
+        unassigned=[dict(room=r, label=l, detail=d) for r, l, d in UNASSIGNED_CONTROLS],
         audio_disabled=house.DISABLE_AUDIO_MANAGER,
     )
 
@@ -84,8 +99,6 @@ def execute(request):
     with _lock:
         if house.systemState != "ONLINE":
             raise RuntimeError("Tests require the system to be ONLINE")
-        if house.HouseActive or house.Demo:
-            raise RuntimeError("Stop the house or room demo before testing individual outputs")
         kind, key, value = request.get("kind"), request.get("id"), request.get("value")
         from control import arduino, dimmer_controller as dim, remote_sensor_monitor as rsm
         result = {"message": "Command sent (not measured feedback)"}

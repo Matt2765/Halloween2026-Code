@@ -8,6 +8,7 @@ from control.arduino import m1Digital_Write
 from utils.thread_diagnostics import dump_threads
 from control.pedro_service import stop_pedro
 from control.doors import DOOR_SOLENOID_PINS, apply_door_shutdown_state
+from control.dimmer_controller import dim
 
 def shutdown():
     log_event("[Shutdown] Executing shutdown routine...")
@@ -18,17 +19,9 @@ def shutdown():
         apply_door_shutdown_state(door)
     stop_pedro()
 
-    def _dim_off(ch: int):
-        for fn_name in ("dim_set", "setDimLevel", "set_dimmer_level",
-                        "dimmer_set", "set_dimmer", "setDimmer"):
-            fn = globals().get(fn_name)
-            if callable(fn):
-                try:
-                    fn(ch, 0)
-                    return True
-                except Exception:
-                    pass
-        return False
+    for i in range(1, 9):
+        #print(i)
+        dim(0, channel=i)
 
     # ---------------- Cabin Room ----------------
     log_event("SHUTDOWN - Cabin Room:")
@@ -39,6 +32,7 @@ def shutdown():
     m1Digital_Write(24, 1); log_event("+120v Lanterns 2 (B) OFF")
     m1Digital_Write(28, 1); log_event("+120v Lightning (C) OFF")
     m1Digital_Write(5, 1); log_event("+120v Porch Lights (G) OFF")
+    m1Digital_Write(6, 1); log_event("+120v Fire Light (C) OFF")
 
     # ---------------- Shower Hallway ----------------
     log_event("SHUTDOWN - Shower Hallway:")
@@ -50,20 +44,21 @@ def shutdown():
     # ---------------- Basement ----------------
     log_event("SHUTDOWN - Basement:")
     m1Digital_Write(61, 1); log_event("Smoke Machine 3 (N) OFF")
-    m1Digital_Write(49, 1); log_event("+12v Laser Pneumatic 1 (D) OFF")
+    m1Digital_Write(49, 1); log_event("+12v Shrine Solenoid (D) OFF")
     m1Digital_Write(37, 1); log_event("+120v Strobe 5 (N) OFF")
-    m1Digital_Write(4, 1); log_event("+120v Lightning Strip (D) OFF")
     m1Digital_Write(3, 1); log_event("+120v Spotlight (D) OFF")
 
     # ---------------- Bathroom ----------------
     log_event("SHUTDOWN - Bathroom:")
     m1Digital_Write(35, 1); log_event("+120v Strobe 2 (F) OFF")
     m1Digital_Write(33, 1); log_event("+120v Mirror Light (F) OFF")
-    m1Digital_Write(60, 1); log_event("Smoke Machine 1 (H) OFF")
     m1Digital_Write(31, 1); log_event("+120v Magic Light (F) OFF")
 
     # ---------------- Dynamic Hallway ----------------
     log_event("SHUTDOWN - Dynamic Hallway:")
+    m1Digital_Write(4, 1); log_event("+120v Lightning Strip (D) OFF")
+    m1Digital_Write(7, 1); log_event("+120v Strobe (J) OFF")
+    m1Digital_Write(23, 1); log_event("+120v Lanterns (I) OFF")
 
     # ---------------- Pallet Hallway ----------------
     log_event("SHUTDOWN - Pallet Hallway:")

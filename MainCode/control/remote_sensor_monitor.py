@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import atexit
-from collections import deque
 import json
 import multiprocessing as mp
 import queue
@@ -17,7 +16,6 @@ import re
 import threading
 import time
 import uuid
-import warnings
 
 import serial
 import serial.tools.list_ports
@@ -28,10 +26,6 @@ HELD_FRESH_MS = 6000
 DEVICE_FRESH_MS = 6000
 SILENCE_RECONNECT_MS = 3500
 CONNECTION_LOG_INTERVAL_MS = 10000
-# Logging thresholds only; room calls to obstructed() keep their own settings.
-TOF_LOG_BLOCK_MM = 800
-TOF_LOG_CLEAR_MM = 850
-TOF_LOG_MIN_CONSECUTIVE = 2
 PORT_HINTS = ("Silicon Labs", "CP210", "CH340", "USB-SERIAL", "ESP32", "WCH")
 MAX_DEVICES = 64
 MAX_COMMANDS = 128
@@ -40,16 +34,11 @@ LANTERN_STATES = ("off", "solid_on", "flickering_on", "intense_flickering_on",
 PEDRO_STATES = ("off", "standby", "active")
 _manager = _proc = _shared = _txq = _commands = None
 _started = _disabled = False
-_hist = {}
-_history_lock = threading.RLock()
 _tx_lock = threading.Lock()
 
 
 def _now_ms():
     return int(time.monotonic() * 1000)
-
-
-_now_ms_local = _now_ms
 
 
 def _newer(a, b):
@@ -238,7 +227,7 @@ def _log_event(message):
     log_event(f"[RSM] {message}")
 
 
-def _log_device_changes(previous, current, now, tof_events, debug_info=False):
+def _log_device_changes(previous, current, now, debug_info=False):
     """Log accepted, fresh telemetry transitions rather than every heartbeat."""
     sid, kind, vals = current["id"], current["kind"], current["vals"]
     if current.get("conflict"):
@@ -250,24 +239,7 @@ def _log_device_changes(previous, current, now, tof_events, debug_info=False):
             _log_event(f"{sid} telemetry resumed after {now - previous['t_host_ms']} ms")
     if previous and (previous["session"] != current["session"] or previous.get("conflict")):
         previous = None
-    if kind == "tof":
-        if now - current["t_host_ms"] > STALE_DEFAULT_MS or not vals["valid"]:
-            tof_events.pop(sid, None)
-            return
-        state = tof_events.get(sid)
-        if not state or state["session"] != current["session"] or now - state["last_ms"] > STALE_DEFAULT_MS:
-            state = {"session": current["session"], "blocked": False, "count": 0}
-        state["last_ms"] = now
-        distance = vals["dist_mm"]
-        state["count"] = state["count"] + 1 if distance < TOF_LOG_BLOCK_MM else 0
-        if state["count"] >= TOF_LOG_MIN_CONSECUTIVE and not state["blocked"]:
-            state["blocked"] = True
-            _log_event(f"{sid} tripped ({distance} mm; threshold {TOF_LOG_BLOCK_MM} mm)")
-        elif distance > TOF_LOG_CLEAR_MM and state["blocked"]:
-            state["blocked"] = False
-            _log_event(f"{sid} cleared ({distance} mm)")
-        tof_events[sid] = state
-    elif kind in ("button", "dropdown"):
+    if kind in ("button", "dropdown"):
         index = str(vals["btn"])
         button = current["buttons"][index]
         if now - button["t_host_ms"] >= HELD_FRESH_MS:
@@ -314,7 +286,6 @@ def _log_dropdown_commands(commands, logged, debug_info=False):
 def _monitor_main(shared, commands, txq, port, baud, debug_info=False):
     backoff = 0.25
     last_error_log = None
-    tof_events = {}
     logged_commands = {}
     _log_event(f"Starting monitor on {port or 'auto-detected port'} at {baud} baud")
     while True:
@@ -344,7 +315,7 @@ def _monitor_main(shared, commands, txq, port, baud, debug_info=False):
                         previous = shared.get(obj.get("id")) if isinstance(obj, dict) and obj.get("type") == "device" else None
                         accepted = _ingest(shared, commands, obj, received_at)
                         if accepted and obj.get("type") == "device":
-                            _log_device_changes(previous, shared[obj["id"]], received_at, tof_events, debug_info)
+                            _log_device_changes(previous, shared[obj["id"]], received_at, debug_info)
                         last_valid = _now_ms()
                         if obj["type"] == "hello" and obj.get("host") == token:
                             if not handshake:
@@ -391,7 +362,6 @@ def _monitor_main(shared, commands, txq, port, baud, debug_info=False):
             if last_error_log is None or now - last_error_log >= CONNECTION_LOG_INTERVAL_MS:
                 _log_event(f"Bridge unavailable: {error}. Retrying connection...")
                 last_error_log = now
-            tof_events.clear()
             if connection:
                 connection.close()
             time.sleep(backoff)
@@ -511,6 +481,18 @@ def get_value(sensor_id, key, default=None, max_age_ms=None):
     if key == "dist_mm" and (not vals.get("valid") or vals.get("status") != 0):
         return default
     return vals.get(key, default)
+
+
+def get_TOF_value(device_id):
+    """Latest valid distance in millimeters, or None if unavailable or stale.
+
+    Example: distance_mm = rsm.get_TOF_value("TOF2")
+    Check for None before comparing the distance with a room's own threshold.
+    """
+    rec = get(device_id)
+    if not rec or rec.get("kind") != "tof":
+        return None
+    return get_value(device_id, "dist_mm")
 
 
 def get_pir_state(device_id):
@@ -719,97 +701,6 @@ def lantern(command_id, state, lantern_ids=None):
 
 def button_pop(timeout=0.0):
     raise NotImplementedError("Button event consumption is postponed; use get_button_value().")
-
-
-def set_far_distance_mm(value):
-    warnings.warn("Synthetic far distances are removed; invalid TOF remains unknown", DeprecationWarning, stacklevel=2)
-
-
-def _get_dist_sample(sid, **kwargs):
-    distance = get_value(sid, "dist_mm")
-    rec = get(sid)
-    return (rec["t_host_ms"], distance) if distance is not None and rec else None
-
-def _hist_update(sid: str, window_ms: int, **kw):
-    now = _now_ms_local()
-    sample = _get_dist_sample(sid, **kw)
-
-    # keep a per-sensor deque of (timestamp_ms, distance_mm)
-    if sid not in _hist and len(_hist) >= MAX_DEVICES:
-        _hist.pop(next(iter(_hist)))
-    h = _hist.setdefault(sid, {'q': deque(maxlen=256), 'last': False, 'last_ts': -1})
-    if sample:
-        t_ms, d = sample
-        # avoid duplicating the same timestamp
-        if t_ms != h['last_ts']:
-            h['q'].append((t_ms, d))
-            h['last_ts'] = t_ms
-
-    q = h['q']
-    if sample is None:
-        q.clear()
-        h['last'] = False
-    # evict old samples from the *left* (oldest first)
-    while q and (now - q[0][0]) > window_ms:
-        q.popleft()
-
-    return h
-
-def _distance_filtered(sid: str, window_ms: int=250, min_samples: int=3,
-                          ignore_neg1: bool=True, require_status_zero: bool=False,
-                          method: str="median"):
-    h = _hist_update(sid, window_ms, ignore_neg1=ignore_neg1, require_status_zero=require_status_zero)
-    q = list(h['q'])
-    if len(q) < max(1, min_samples):
-        return None
-    vals = [d for (_, d) in q]
-    if not vals:
-        return None
-    if method == "mean":
-        return sum(vals) / len(vals)
-    vals.sort()
-    n = len(vals); mid = n // 2
-    return vals[mid] if n % 2 else (vals[mid-1] + vals[mid]) / 2
-
-def _obstructed(sid: str, block_mm: int,
-               clear_mm: int|None=None,
-               window_ms: int=250,
-               min_consecutive: int=2,
-               ignore_neg1: bool=True,
-               require_status_zero: bool=False) -> bool:
-    if _disabled:
-        return False
-    h = _hist_update(sid, window_ms, ignore_neg1=ignore_neg1, require_status_zero=require_status_zero)
-    q = h['q']
-    if clear_mm is None:
-        clear_mm = block_mm + 50
-    consec = 0
-    for (_, d) in reversed(q):
-        if d < block_mm:
-            consec += 1
-            if consec >= max(1, min_consecutive):
-                h['last'] = True
-                return True
-        else:
-            break
-    if h['last']:
-        if q:
-            _, latest = q[-1]
-            if latest > clear_mm:
-                h['last'] = False
-    return h['last']
-
-
-
-def get_distance_filtered(*args, **kwargs):
-    with _history_lock:
-        return _distance_filtered(*args, **kwargs)
-
-
-def obstructed(*args, **kwargs):
-    # Room triggers require positive valid evidence. Doors separately require clear evidence.
-    with _history_lock:
-        return _obstructed(*args, **kwargs)
 
 
 def format_table():

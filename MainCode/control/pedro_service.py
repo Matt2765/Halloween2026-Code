@@ -5,7 +5,7 @@ from context import house
 from pedro import ASSETS, PedroShow
 from utils.tools import log_event
 
-DEFAULT_CHANNEL = "CabinRoom_Wall"
+DEFAULT_CHANNEL = "Pedro"
 DEFAULT_QUIPS = ASSETS / "SoundDir" / "Quips"
 _lock = threading.RLock()
 _show = None

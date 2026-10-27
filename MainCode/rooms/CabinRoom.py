@@ -17,9 +17,7 @@ wallLanterns = False
 # setDoorState(1, "OPEN")           # "CLOSED" / "CLOPEN" also supported
 # play_audio("CabinRoom", "Hit.wav", gain=1)  # threaded=True / looping=True
 # if BreakCheck(): return
-# while not rsm.obstructed("TOF2", block_mm=800, window_ms=250, min_consecutive=2):
-#     if BreakCheck(): return
-#     t.sleep(0.05)
+# distance_mm = rsm.get_TOF_value("TOF2")  # Millimeters; None if unavailable/stale
 # log_event("[CabinRoom] Effect...")
 # toggleHouseLights(True)  # False = OFF
 # threading.Thread(target=function_name, daemon=True, name="CabinRoom effect").start()
@@ -56,7 +54,7 @@ def run():
             play_audio("CabinRoom_Wall", "cabinAmbienceShort.wav", gain=.3)
             play_audio("CabinRoom_PA", "cabinAmbienceShort.wav", gain=.3)
 
-            wait(43) #43
+            wait(3)  # 3s elapsed; 43
 
             dim(60,channel=2)
             play_audio("CabinRoom_Wall", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.4)
@@ -64,7 +62,7 @@ def run():
             setDoorState(2, "OPEN")
             setDoorState(4, "OPEN")
 
-            wait(6)
+            wait(6)  # 9s elapsed
 
             effect_threads.append(dimFlickerOut(effect_stop))
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,5))
@@ -84,9 +82,9 @@ def run():
 
             rsm.lantern(1, "intense_flickering_on")
 
-            wait(2)
+            wait(2)  # 11s elapsed
 
-            wait(3)
+            wait(3)  # 14s elapsed
 
             setDoorState(2, "CLOSED")
             setDoorState(4, "CLOSED")
@@ -97,7 +95,7 @@ def run():
             t.sleep(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
-            wait(10)
+            wait(10)  # 24s elapsed
 
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,5))
             play_audio("CabinRoom_Wall", "thunder3.wav", gain=.5)
@@ -105,38 +103,58 @@ def run():
             t.sleep(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
-            wait(11.5)
+            wait(11.5)  # 35.5s elapsed
 
             rsm.lantern(2, "intense_flicker_out")
             wallLanterns = False
 
-            wait(5)
+            wait(5)  # 40.5s elapsed
 
             m1Digital_Write(22, 1) #strobe on
 
-            wait(1)
+            wait(1)  # 41.5s elapsed
 
-            bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,5))
+            bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,6))
             play_audio("CabinRoom_Wall", "ES_Lightning Bolt 7 - SFX Producer.wav", gain=.5)
             play_audio("CabinRoom_PA", "thunder4.wav", gain=.5)
             t.sleep(1.3)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
-            wait(4)
+            wait(4)  # 45.5s elapsed
+
+            bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,6))
+            play_audio("CabinRoom_Wall", "ES_Lightning Bolt 4 - SFX Producer.wav", gain=.5)
+            play_audio("CabinRoom_PA", "ES_Lightning Bolt 4 - SFX Producer.wav", gain=.5)
+            t.sleep(.5)
+            play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
+
             setDoorState(2, "OPEN")
-            wait(4.8)
+            setDoorState(3, "OPEN")
+            wait(4.8)  # 50.3s elapsed
+
+            bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,6))
+            play_audio("CabinRoom_Wall", "thunder2.wav", gain=.5)
+            play_audio("CabinRoom_PA", "thunder2.wav", gain=.5)
+            t.sleep(.5)
+            play_audio("primary_LFE", "SUB-Lightning3.wav", gain=.5)
+            play_audio("primary_LFE", "thunder2.wav", gain=.5)
 
             setDoorState(2, "CLOPEN")
-            setDoorState(3, "OPEN")
 
             rsm.lantern(3, "flickering_on")
 
+            m1Digital_Write(23, 0) #dynamic hallway lanterns
+
             house.CabinRoom_state = "STANDBY"
 
+            wait(5)  # 55.3s elapsed
+
             while not house.Basement_state == "ACTIVE":
+                if house.DoorState[3] == "CLOSED":
+                    break
                 if not house.HouseActive or house.Demo:
                     break
-                wait(1)
+                wait(1)  # 1s polling interval until Basement is ACTIVE
 
             m1Digital_Write(22, 0) #strobe off
 

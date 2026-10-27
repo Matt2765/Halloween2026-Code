@@ -99,7 +99,7 @@ primary_channels: ChannelMap = {
     "DynamicHallway": {"index": 2, "gain": 1.0},
     "primary_LFE": {"index": 3, "gain": 1.0},
     "Surround Back Left": {"index": 4, "gain": 1.0},
-    "Shower Hallway": {"index": 5, "gain": 1.0},
+    "Shower_Hallway": {"index": 5, "gain": 1.0},
     "Bathroom": {"index": 6, "gain": 1.0},
     "Basement": {"index": 7, "gain": 1.0},
     # "stereo_primary_pair": {"index": [0, 1], "gain": 1.0},
@@ -108,6 +108,12 @@ primary_channels: ChannelMap = {
 
 # Secondary output channels.
 secondary_channels: ChannelMap = {
+    # Named ONKYO routes from the current wiring sheet. Generic aliases below
+    # remain available for diagnostics and existing callers.
+    "PalletHallway": {"index": 6, "gain": 1.0},  # Surround left
+    "ForestHallway": {"index": 2, "gain": 1.0},  # Center
+    "Pedro": {"index": 1, "gain": 1.0},  # Front right
+    "Graveyard": {"index": 4, "gain": 1.0},  # Surround back left
     "secondary_FL": {"index": 0, "gain": 1.0},
     "secondary_FR": {"index": 1, "gain": 1.0},
     "secondary_C": {"index": 2, "gain": 1.0},

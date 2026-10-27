@@ -34,7 +34,7 @@ CLOSE_TRAVEL_S = {
     3: 7,
     4: 4,
     5: 4,
-    6: 7,
+    6: 6,
 }
 CLOPEN_HOLD_S = {
     1: 12,
