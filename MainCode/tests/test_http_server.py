@@ -111,6 +111,45 @@ class HTTPServerTests(unittest.TestCase):
                     connection.close()
             self.assertEqual(seen[0]["id"], "cabin_strobe")
 
+    def test_room_states_are_live_house_values_on_the_mains_page(self):
+        house = self.scope["house"]
+        house.HouseActive, house.houseLights = False, True
+        house.DoorState, house.TargetDoorState = {}, {}
+        rooms = self.scope["ROOM_STATES"]
+        for room, _ in rooms:
+            setattr(house, room + "_state", "INACTIVE")
+        house.CabinRoom_state = "ACTIVE"
+        house.Bathroom_state = "STANDBY"
+        rsm = SimpleNamespace(
+            get_value=lambda *args: None, device_status=lambda *args: {},
+            get_button_value=lambda *args: None, get_pir_state=lambda *args: {},
+            get_servo_state=lambda *args: {}, get_lantern_state=lambda *args: {},
+            healthy=lambda: {}, command_failure=lambda: None,
+        )
+        control = ModuleType("control")
+        control.remote_sensor_monitor = rsm
+        modules = {
+            "control": control,
+            "control.doors": SimpleNamespace(DOOR_SOLENOID_PINS={}, DOOR_SENSOR_IDS={},
+                                              DOOR_SENSOR_BYPASS={}),
+            "control.pedro_service": SimpleNamespace(pedro_status=lambda: {}),
+        }
+        with patch.dict(sys.modules, modules):
+            status, body = self.get("/api/status")
+            self.assertEqual(status, 200)
+            states = {r["id"]: r["state"] for r in json.loads(body)["rooms"]}
+            self.assertEqual(len(states), 7)
+            self.assertEqual(states["CabinRoom"], "ACTIVE")
+            self.assertEqual(states["Bathroom"], "STANDBY")
+            house.Bathroom_state = "INACTIVE"
+            _, body = self.get("/api/status")
+            states = {r["id"]: r["state"] for r in json.loads(body)["rooms"]}
+            self.assertEqual(states["Bathroom"], "INACTIVE")
+        status, page = self.get()
+        self.assertEqual(status, 200)
+        self.assertIn(b'id="roomStates"', page)
+        self.assertIn(b'renderRoomStates(s.rooms||[])', page)
+
     def test_slow_hardware_does_not_block_page_or_emergency(self):
         started, release = threading.Event(), threading.Event()
 

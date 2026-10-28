@@ -137,13 +137,32 @@ _stop_event = threading.Event()
 
 
 class PlaybackHandle:
-    """Completion and scoped cancellation for one file playback."""
+    """Completion, fade-out, and scoped cancellation for one file playback."""
     def __init__(self, epoch: int, label: str):
         self.epoch = epoch
         self.label = label
         self.created_at = time.monotonic()
         self.done = threading.Event()
         self.cancelled = False
+        self._fade_seconds: float | None = None
+
+    def fade_out(self, seconds: float = 2.0) -> None:
+        """Fade this playback to silence, then stop it. Returns immediately.
+
+        The first fade request wins; stop() can still interrupt it immediately.
+        A zero duration stops immediately. Finished playbacks are unaffected.
+        """
+        if isinstance(seconds, bool):
+            raise ValueError("Fade duration must be a finite, nonnegative number")
+        duration = float(seconds)
+        if not np.isfinite(duration) or duration < 0:
+            raise ValueError("Fade duration must be a finite, nonnegative number")
+        if self.done.is_set():
+            return
+        if duration == 0:
+            self.stop()
+        elif self._fade_seconds is None:
+            self._fade_seconds = duration
 
     def stop(self) -> None:
         self.cancelled = True
@@ -336,6 +355,8 @@ class _Voice:
     stopped: bool = False
     fallback_key: tuple[str, float, bool, bool, bool] | None = None
     fallback_routes: set[str] = field(default_factory=set)
+    fade_length: int | None = None
+    fade_samples: int = 0
 
 class DeviceMixer:
     def __init__(
@@ -495,6 +516,19 @@ class DeviceMixer:
                 done.append(voice)
                 continue
             block, finished = voice.source.read(frames)
+            # Apply the fade to this voice before mixing so other sounds keep
+            # their volume. Advance by audio samples rather than wall-clock time.
+            if voice.fade_length is None and voice.session._fade_seconds is not None:
+                voice.fade_length = max(1, round(voice.session._fade_seconds * self.samplerate))
+            if voice.fade_length is not None:
+                envelope = np.maximum(
+                    0.0, 1.0 - (voice.fade_samples + np.arange(len(block))) / voice.fade_length
+                ).astype(np.float32)
+                block = block * envelope[:, None]
+                voice.fade_samples += frames
+                if voice.fade_samples >= voice.fade_length:
+                    finished = True
+                    voice.session.cancelled = True
             self._route(output, block, voice)
             if finished:
                 done.append(voice)
@@ -978,7 +1012,8 @@ def play_audio(
     ``play_audio("CabinRoom: Welcome")`` speaks on a named route, while bare
     text is spoken on every primary channel.  TTS is always non-blocking and
     intentionally ignores break/shutdown requests. File playback returns a
-    handle with `done`, `cancelled` and `stop()`; callers may ignore it as before.
+    handle with `done`, `cancelled`, `stop()` and non-blocking
+    `fade_out(seconds=2)`; callers may ignore it as before.
     """
     if house.DISABLE_AUDIO_MANAGER:
         return _disabled_playback()

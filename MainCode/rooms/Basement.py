@@ -78,7 +78,12 @@ def run():
 
             m1Digital_Write(3, 0)
 
-            while rsm.get_TOF_value("TOF1") > 100:
+            while True:
+                if BreakCheck():
+                    return
+                distance = rsm.get_TOF_value("TOF1")
+                if distance is not None and distance <= 90:
+                    break
                 wait(1)
 
             play_audio("Basement", "basementExamplev3.wav", gain=1)
@@ -102,11 +107,17 @@ def run():
 
             m1Digital_Write(49, 0) #shrine
 
+            rsm.lantern(10, "intense_flickering_on")
+
             wait(2.5)  # 12s elapsed
 
             spotState = "OUT"
 
-            wait(3)  # 15s elapsed
+            wait(1)
+
+            rsm.lantern(11, "intense_flicker_out")
+
+            wait(2)  # 15s elapsed
 
             setDoorState(5, "CLOSED")
 
@@ -129,7 +140,13 @@ def run():
 
             stopAmbientFlicker(3)
 
-            wait(2.1)  # 35.1s elapsed
+            rsm.lantern(12, "strobe")
+
+            wait(1.1)
+
+            wait(1)  # 35.1s elapsed
+
+            rsm.lantern(13, "off")
 
             wait(5)  # 40.1s elapsed
 
@@ -137,7 +154,11 @@ def run():
 
             setDoorState(6, "CLOPEN")
 
+            dim.dim(22, channel=4) #dynamic hallway green
+
             wait(15)  # 55.1s elapsed
+
+            dim.dim(0, channel=4) #dynamic hallway green
 
             m1Digital_Write(37, 1) #strobe
 

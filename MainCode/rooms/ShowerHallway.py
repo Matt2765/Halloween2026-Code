@@ -30,16 +30,19 @@ def run():
 
             # Sequencing here
 
-            while not rsm.get_button_value("BTN1"):
-                if house.Demo:
-                    break
+            while not rsm.get_button_value("BTN3"):
+                '''if house.Demo:
+                    break'''
                 t.sleep(.1)
                 if BreakCheck():
                     break
 
+            m1Digital_Write(32, 0) #strobe
             play_audio("Shower_Hallway", "PZ-jumpscare2.wav", gain=1)
 
-            wait(10)  # 10s elapsed
+            wait(2)  # 10s elapsed
+
+            m1Digital_Write(32,1) #strobe
 
             if BreakCheck() or house.Demo:
                 if house.Demo:

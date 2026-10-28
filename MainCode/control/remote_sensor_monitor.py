@@ -614,8 +614,8 @@ def tx_to_id(device_id, payload):
             return cid
         request = {"v": 1, "type": "command", "host": connection["host"], "command_id": cid,
                    "id": device_id, "target_session": device["session"], "op": op, "value": value, "duration_ms": duration}
-        if op == "led" and device["kind"] != "dropdown":
-            _commands[cid] = dict(rec, status="rejected", reason="not_a_dropdown")
+        if op == "led" and device["kind"] not in ("dropdown", "button"):
+            _commands[cid] = dict(rec, status="rejected", reason="not_an_led_device")
             return cid
         if op == "pedro":
             if device["kind"] != "pedro":
@@ -652,7 +652,11 @@ def servo(device_id, angle, ramp_ms=None):
 
 
 def led(device_id, on):
-    """Set dropdownNode's onboard indicator; return a command ID for command_status()."""
+    """Set a dropdown/button node's indicators; return an ID for command_status().
+
+    Button nodes require LED-enabled firmware; both onboard and external LEDs
+    follow the command. Unsupported button firmware rejects the command.
+    """
     return tx_to_id(device_id, {"cmd": "led", "on": on})
 
 
@@ -674,17 +678,27 @@ def lantern(command_id, state, lantern_ids=None):
     """Issue a numbered cue; return {device_id: delivery UUID} for status checks.
 
     lantern_ids: one ID, an iterable of IDs, or None for all fresh lanterns
-    synced and waiting for this cue. Explicit targets still obey local sync and
-    sequence gates. Call the next cue after telemetry confirms next_command_id.
+    synced and waiting for this cue. During a room demo, untargeted cues use
+    each synced lantern's reported next_command_id instead of the room cue ID.
+    Explicit targets still obey the supplied cue ID and local sync/sequence gates.
+    Call the next cue after telemetry confirms next_command_id.
     No replay or automatic catch-up occurs for absent lanterns.
     """
     if type(command_id) is not int or not 1 <= command_id < 0xffffffff:
         raise ValueError("Lantern command ID must be 1..4294967294")
     if state not in LANTERN_STATES:
         raise ValueError(f"Lantern state must be one of {LANTERN_STATES}")
+    demo_mode = False
+    records = {}
     if lantern_ids is None:
-        targets = [sid for sid, rec in snapshot().items() if rec["kind"] == "lantern" and
-                   rec["vals"].get("synced") and rec["vals"].get("next_command_id") == command_id and
+        from context import house
+        demo_mode = bool(house.Demo)
+        records = snapshot()
+        targets = [sid for sid, rec in records.items() if rec["kind"] == "lantern" and
+                   rec["vals"].get("synced") and
+                   type(rec["vals"].get("next_command_id")) is int and
+                   1 <= rec["vals"]["next_command_id"] < 0xffffffff and
+                   (demo_mode or rec["vals"]["next_command_id"] == command_id) and
                    device_status(sid)["available"]]
     else:
         targets = [lantern_ids] if isinstance(lantern_ids, str) else list(lantern_ids)
@@ -692,9 +706,10 @@ def lantern(command_id, state, lantern_ids=None):
         raise ValueError("Invalid lantern device ID")
     results = {}
     for sid in dict.fromkeys(targets):
-        rec = get(sid)
+        rec = records.get(sid) if lantern_ids is None else get(sid)
         generation = rec["vals"].get("sync_generation", 0) if rec else 0
-        results[sid] = tx_to_id(sid, {"cmd": "lantern", "state": state, "cue_id": command_id,
+        cue_id = rec["vals"]["next_command_id"] if demo_mode else command_id
+        results[sid] = tx_to_id(sid, {"cmd": "lantern", "state": state, "cue_id": cue_id,
                                      "sync_generation": generation})
     return results
 

@@ -351,6 +351,22 @@ Start looping ambience:
 play_audio("Basement", "ambience.wav", gain=1.0, looping=True)
 ```
 
+Keep the returned file playback handle to stop or fade only that sound:
+
+```python
+music = play_audio("Basement", "ambience.wav", gain=0.6, looping=True)
+while not BreakCheck() and not rsm.get_button_value("BTN2"):
+    wait(0.05)
+if music is not None:
+    music.fade_out(seconds=2)
+```
+
+`fade_out()` returns immediately and fades this playback to silence before
+stopping it. Other sounds keep their volume. The first fade request wins;
+`music.stop()` or `music.fade_out(0)` still stops immediately. `music.done.wait()`
+can wait for completion. Normal BreakCheck/shutdown cancellation remains
+immediate. File playback supports handles; text-to-speech does not return one.
+
 Block until a scene file finishes:
 
 ```python

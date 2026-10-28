@@ -3,6 +3,10 @@
 Flash this sketch once per board, setting `DEVICE_ID` to `LANTERN1` through
 `LANTERN4`. Set `LIGHT_PIN`, `SYNC_BUTTON_PIN`, output polarity, brightness limit,
 and fade/ramp durations and strobe timing ranges in the configuration block.
+`MAX_BRIGHTNESS` is 51 (20% of full PWM) for normal modes, fades, ramps,
+and sync-feedback flashes. Strobe has a separate `STROBE_BRIGHTNESS` limit of
+204 (80% peak PWM), preserving its randomized bright pulses and dark gaps. Reflash
+each wireless lantern to apply this change; restarting Python does not apply it.
 IDs also appear in the GUI list.
 This sketch uses low-speed LEDC PWM, supported by the original ESP32 and ESP32
 variants without high-speed LEDC (including C3/S3). The defaults are configured
@@ -90,6 +94,14 @@ behind: resend the missing cue explicitly after checking its state, or press
 sync and start that lantern's sequence again. An `unconfirmed` delivery may have
 executed; check telemetry rather than assuming failure. Do not automatically
 replay commands after a reconnect.
+
+During a room demo (`house.Demo`), Python group calls without `lantern_ids`
+send the requested effect to every available, synced lantern using each
+lantern's reported next cue number. This lets a newly synced lantern follow
+Bathroom or another room without first receiving earlier rooms' cues. Explicit
+device targets keep the supplied cue number. Normal full-house sequences keep
+their original cue numbers. Sync-button requirements and firmware sequence
+checks still apply; there is no replay or catch-up of missed effects.
 
 Pressing sync increments a generation in the node. Commands carry the generation
 observed by RSM as well as the persistent boot session, so delayed commands from

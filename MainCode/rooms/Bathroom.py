@@ -28,12 +28,11 @@ def run():
         rsm.servo("DROPDOWN1", '190') #frame in lowered position
         rsm.led("DROPDOWN1", False)
         threading.Thread(target=dropDownLatch, daemon=True).start()
+        house.Bathroom_state = "STANDBY"
 
         while house.HouseActive or house.Demo:
             if BreakCheck():
                 break
-
-            house.Bathroom_state = "ACTIVE"
 
             while not house.CabinRoom_state == "STANDBY":
                 if house.Demo:
@@ -44,6 +43,8 @@ def run():
                 else:
                     break
 
+            house.Bathroom_state = "ACTIVE"
+            
             play_audio("Bathroom", "bathroomMusicPT1.wav", gain=.6)
 
             ambientLight = True
@@ -51,6 +52,8 @@ def run():
             m1Digital_Write(31, 0) #magic light
 
             wait(20)  # 20s elapsed
+            
+            dim(0, channel=5) #dynamic hallway orange
 
             setDoorState(3, "CLOSED")
             setDoorState(4, "OPEN")
@@ -111,14 +114,21 @@ def run():
 
             log_event("waiting...")
 
-            wait(12)  # 101.5s elapsed
-            rsm.lantern(6, "flickering_on")
+            wait(5)  
+            rsm.lantern(6, "intense_flickering_on")
 
             setDoorState(5, "OPEN")
 
-            dim(25, channel=5) #dynamic hallway orange
+            #dim(25, channel=5) #dynamic hallway orange
 
-            wait(10)  # 111.5s elapsed
+            val = ""
+            while rsm.get_pir_state("PIR3")["triggered"] is False: #door 4 sens
+                if BreakCheck():
+                    break
+                t.sleep(.5)
+
+            setDoorState(4, "CLOPEN")
+            rsm.lantern(7, "flicker_out")
 
             house.Basement_state = "ACTIVE"
 

@@ -6,7 +6,8 @@ const char* DEVICE_ID = "LANTERN4"; // Flash LANTERN1..LANTERN4 with unique IDs.
 constexpr int LIGHT_PIN = 4;       // C3 Super Mini GPIO4: PWM to LED driver/MOSFET.
 constexpr int SYNC_BUTTON_PIN = 5;  // C3 Super Mini GPIO5: button to GND; pull-up.
 constexpr bool LIGHT_ACTIVE_HIGH = true;
-constexpr uint8_t MAX_BRIGHTNESS = 255;
+constexpr uint8_t MAX_BRIGHTNESS = 51; // 20% output for normal effects and sync feedback.
+constexpr uint8_t STROBE_BRIGHTNESS = 204; // 80% peak output for the strobe effect.
 constexpr uint32_t DEBOUNCE_MS = 30, LONG_PRESS_MS = 3000;
 constexpr uint32_t FLICKER_OUT_MS = 1800, INTENSE_FLICKER_OUT_MS = 2800;
 constexpr uint32_t FLICKER_ON_RAMP_MS = 1500; // Ramp only when the light is dark.
@@ -33,9 +34,9 @@ uint32_t flashBegan=0, flashStep=0;
 uint8_t flashSteps=0;
 void lightTick(uint32_t now);
 
-void output(uint8_t level) {
+void output(uint8_t level, uint8_t limit=MAX_BRIGHTNESS) {
   outputLevel=level;
-  brightness=uint16_t(level)*MAX_BRIGHTNESS/255;
+  brightness=uint16_t(level)*limit/255;
   ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,LIGHT_ACTIVE_HIGH?brightness:255-brightness);
   ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0);
 }
@@ -134,7 +135,7 @@ void lightTick(uint32_t now) {
     if(step>=flashSteps) flashSteps=0;
     else level=(step%2==0)?255:0;
   }
-  output(level);
+  output(level,lightState==STROBE && !flashSteps?STROBE_BRIGHTNESS:MAX_BRIGHTNESS);
   if(completed) report();
 }
 void setup() {

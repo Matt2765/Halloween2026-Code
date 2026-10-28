@@ -30,6 +30,9 @@ def run():
 
     try:
         # Room startup here
+
+        rsm.led("BTN1", False)
+
         while house.HouseActive or house.Demo:
             if BreakCheck():
                 break
@@ -51,10 +54,34 @@ def run():
             m1Digital_Write(26, 0) #wall lantern 1
             m1Digital_Write(24, 0) #wall lantern 2
 
-            play_audio("CabinRoom_Wall", "cabinAmbienceShort.wav", gain=.3)
-            play_audio("CabinRoom_PA", "cabinAmbienceShort.wav", gain=.3)
+            cabinMusic1 = play_audio("CabinRoom_Wall", "cabinAmbienceLong.wav", gain=.3, looping=True)
+            cabinMusic2 = play_audio("CabinRoom_PA", "cabinAmbienceLong.wav", gain=.3, looping=True)
 
-            wait(3)  # 3s elapsed; 43
+            while(
+                not house.Bathroom_state == "STANDBY" 
+                or house.DoorState[3] == "OPEN" 
+                or house.DoorState[4] == "OPEN"
+            ):
+                if BreakCheck() or house.Demo:
+                    break
+                wait(1)
+
+            wait(1)
+
+            rsm.led("BTN1", True)
+            log_event("cabin room ready for btn press")
+
+            while not rsm.get_button_value("BTN1"):
+                if BreakCheck():
+                    break
+                t.sleep(.1)
+
+            rsm.led("BTN1", False)
+
+            if cabinMusic1 is not None:
+                cabinMusic1.fade_out(seconds=1)
+            if cabinMusic2 is not None:
+                cabinMusic2.fade_out(seconds=1)
 
             dim(60,channel=2)
             play_audio("CabinRoom_Wall", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.4)
@@ -70,6 +97,9 @@ def run():
             play_audio("CabinRoom_PA", "thunder1.wav", gain=.5)
             t.sleep(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
+
+            blast_stop = threading.Event()
+            effect_threads.append(airBlasts(blast_stop))
 
             #start flickering wall lanterns here
             if not BreakCheck():
@@ -104,6 +134,8 @@ def run():
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
             wait(11.5)  # 35.5s elapsed
+
+            blast_stop.set()
 
             rsm.lantern(2, "intense_flicker_out")
             wallLanterns = False
@@ -140,6 +172,8 @@ def run():
             play_audio("primary_LFE", "thunder2.wav", gain=.5)
 
             setDoorState(2, "CLOPEN")
+
+            dim(22, channel=5) #dynamic hallway orange
 
             rsm.lantern(3, "flickering_on")
 
@@ -180,6 +214,43 @@ def run():
         m1Digital_Write(24, 1)
         house.CabinRoom_state = "INACTIVE"
         log_event("[CabinRoom] Exiting.")
+
+def airBlasts(stop_event=None):
+    """Start pulsing D43/D47 together; set stop_event to stop and leave both OFF."""
+    if stop_event is None:
+        stop_event = threading.Event()
+
+    def pause(seconds):
+        end = t.monotonic() + seconds
+        while not stop_event.is_set() and not BreakCheck():
+            remaining = end - t.monotonic()
+            if remaining <= 0:
+                return True
+            stop_event.wait(min(0.02, remaining))
+        return False
+
+    def pulse():
+        try:
+            while not stop_event.is_set() and not BreakCheck():
+                for pin in (43, 47):
+                    if stop_event.is_set() or BreakCheck():
+                        return
+                    m1Digital_Write(pin, 0)
+                if not pause(random.uniform(0.5, 1.5)):
+                    return
+                for pin in (43, 47):
+                    m1Digital_Write(pin, 1)
+                if not pause(random.uniform(0.7, 1.7)):
+                    return
+        finally:
+            m1Digital_Write(43, 1)
+            m1Digital_Write(47, 1)
+
+    thread = threading.Thread(target=pulse, daemon=True,
+                              name="CabinRoom Air Blasts")
+    thread.start()
+    return thread
+
 
 def dimFlickerOut(stop_event=None):
     """Quickly flicker Grandma's DIM2 light out without delaying the sequence."""

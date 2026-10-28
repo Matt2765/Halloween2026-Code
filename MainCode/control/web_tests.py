@@ -19,6 +19,8 @@ RELAYS = [
     ("cabin_lightning", "Cabin Room", "Lightning", 28, 0),
     ("cabin_porch", "Cabin Room", "Porch lights", 5, 0),
     ("cabin_fire", "Cabin Room", "Fire light", 6, 0),
+    ("cabin_chimney_smoke", "Cabin Room", "Chimney smoke machine", 59, 0),
+    ("cabin_rocking_chair", "Cabin Room", "Rocking chair", 51, 0),
     ("bath_strobe", "Bathroom", "Strobe", 35, 0),
     ("bath_mirror", "Bathroom", "Mirror light", 33, 0),
     ("bath_magic", "Bathroom", "Magic light", 31, 0),
@@ -39,13 +41,12 @@ RELAYS = [
     ("grave_smoke", "Graveyard", "Industrial smoke machine 5", 58, 0),
 ]
 DIMMERS = [
-    (1, "Cabin Room", "Ambient light"), (2, "Cabin Room", "Grandma light"),
-    (3, "Basement", "Wall crack lights"), (4, "Dynamic Hallway", "Ambient light 1"),
-    (5, "Dynamic Hallway", "Ambient light 2"), (6, "Bathroom", "Ambient light"),
-    (7, "Basement", "Ambient light"), (8, "Pallet Hallway", "Ambient lights"),
+    (1, "Cabin Room", "Ambient light 1"), (2, "Cabin Room", "Grandma light"),
+    (3, "Basement", "Wall crack lights"), (4, "Dynamic Hallway", "Ambient light 3"),
+    (5, "Dynamic Hallway", "Ambient light 4"), (6, "Bathroom", "Ambient light 2"),
+    (7, "Basement", "Ambient light 6"), (8, "Pallet Hallway", "Ambient light 5"),
 ]
 UNASSIGNED_CONTROLS = [
-    ("Cabin Room", "Chimney smoke machine", "Cable G, red/black; Arduino pin needed"),
     ("Bathroom", "Mirror servo", "Servo device ID needs to be assigned"),
     ("Dynamic Hallway", "Blacklights", "Cable I, red; Arduino pin needed"),
     ("Dynamic Hallway", "Smoke machine 2", "Cable J, red/black; Arduino pin needed"),

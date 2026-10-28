@@ -113,9 +113,17 @@ Existing room callers expect `TOF1`–`TOF5`, `BTN1`–`BTN4`, `Multi_BTN1`,
 `SERVO1` and `SPRITE1`; flash each physical board with its corresponding ID.
 Keep panel indices one-based and unique. All existing GPIO assignments are
 preserved. Buttons connect their GPIO to ground and use internal pull-ups.
-Both button sketches now use light sleep so their session and sequence survive
+Button sketches can use light sleep so their session and sequence survive
 idle/wake without repeated NVS writes. The single button trades some deep-sleep
 savings for reliable release handling; measure actual battery life on the bench.
+
+`remoteButton` now defaults to `ENABLE_LED_CONTROL=true`: it stays awake for
+`rsm.led(DEVICE_ID, True/False)`, switching its onboard GPIO2 LED and external
+GPIO4 together, with GPIO5 held LOW as the external LED ground return.
+The LED pins and their polarities are configurable. LED-enabled
+nodes also report released button state every two seconds. Set
+`ENABLE_LED_CONTROL=false` to restore the configured `IDLE_SLEEP` behavior.
+See [button LED configuration](remoteButton/README.md).
 
 The servo's existing NVS `servo/boot_deg` overrides `DEFAULT_ANGLE`. Changing the
 compile-time fallback does not overwrite a previously saved default. The existing

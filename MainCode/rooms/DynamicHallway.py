@@ -34,19 +34,29 @@ def run():
             if house.Demo:
                 m1Digital_Write(23, 0)
 
-            while not rsm.get_button_value("BTN2"):
+            '''while not rsm.get_button_value("BTN2"):
                 t.sleep(.1)
                 if BreakCheck():
+                    break'''
+            
+            while(
+                rsm.get_pir_state("PIR3")["triggered"] is False
+                or house.Bathroom_state == "ACTIVE"
+            ):
+                if BreakCheck():
                     break
+                t.sleep(.5)
 
             lightning_bolt(threaded=True) 
 
-            wait(1)
+            wait(3)
 
             dim(0, channel=4) #dynamic hallway green
             dim(0, channel=5) #dynamic hallway orange
 
-            while not rsm.get_button_value("BTN2"):
+            lightning_bolt(threaded=True)
+
+            while not rsm.get_button_value("BTN4"):
                 t.sleep(.1)
                 if BreakCheck():
                     break
@@ -57,9 +67,15 @@ def run():
 
             t.sleep(.25)
 
+            rsm.lantern(8, "strobe")
+
             play_audio("DynamicHallway", "PZ-jumpscare3.wav", gain=1)
 
-            wait(10)
+            wait(2)
+
+            rsm.lantern(9, "flickering_on")
+
+            wait(8)
 
             m1Digital_Write(7, 1) #strobe
 

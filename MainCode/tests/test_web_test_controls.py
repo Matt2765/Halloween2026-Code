@@ -44,6 +44,21 @@ class WebTestControlsTests(unittest.TestCase):
                 self.arduino.M1.digital_write.assert_called_with(pin,on if value else 1-on)
         self.assertEqual(next(r[4] for r in self.scope['RELAYS'] if r[0]=='cabin_strobe'),1)
 
+    def test_relay_pins_and_off_levels_match_shutdown(self):
+        path = Path(__file__).resolve().parents[1] / 'control/shutdown.py'
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'))
+        shutdown = next(n for n in tree.body
+                        if isinstance(n, ast.FunctionDef) and n.name == 'shutdown')
+        shutdown_outputs = {
+            ast.literal_eval(node.args[0]): ast.literal_eval(node.args[1])
+            for node in ast.walk(shutdown)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'm1Digital_Write'
+        }
+        test_outputs = {pin: 1 - on for key, room, label, pin, on in self.scope['RELAYS']
+                        if key != 'house_light'}
+        self.assertEqual(test_outputs, shutdown_outputs)
+
     def test_numeric_validation_and_dimmer_channel(self):
         self.execute('dimmer',6,37.5)
         self.dim.dim.assert_called_with(37.5,channel=6,force=True)

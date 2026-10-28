@@ -19,8 +19,10 @@ def shutdown():
         apply_door_shutdown_state(door)
     stop_pedro()
 
+    # DIM1 Cabin ambient, DIM2 Grandma, DIM3 Basement wall cracks,
+    # DIM4/5 Dynamic Hallway ambient, DIM6 Bathroom ambient,
+    # DIM7 Basement ambient, DIM8 Pallet Hallway ambient.
     for i in range(1, 9):
-        #print(i)
         dim(0, channel=i)
 
     # ---------------- Cabin Room ----------------
@@ -33,6 +35,8 @@ def shutdown():
     m1Digital_Write(28, 1); log_event("+120v Lightning (C) OFF")
     m1Digital_Write(5, 1); log_event("+120v Porch Lights (G) OFF")
     m1Digital_Write(6, 1); log_event("+120v Fire Light (C) OFF")
+    m1Digital_Write(59, 1); log_event("Chimney Smoke Machine (G) OFF")
+    m1Digital_Write(51, 1); log_event("+12v Rocking Chair (A) OFF")
 
     # ---------------- Shower Hallway ----------------
     log_event("SHUTDOWN - Shower Hallway:")
@@ -59,12 +63,18 @@ def shutdown():
     m1Digital_Write(4, 1); log_event("+120v Lightning Strip (D) OFF")
     m1Digital_Write(7, 1); log_event("+120v Strobe (J) OFF")
     m1Digital_Write(23, 1); log_event("+120v Lanterns (I) OFF")
+    # Pending pin assignments: blacklights (I, red), smoke machine 2 (J).
 
     # ---------------- Pallet Hallway ----------------
     log_event("SHUTDOWN - Pallet Hallway:")
     m1Digital_Write(29, 1); log_event("+120v Strobe 3 (K) OFF")
     m1Digital_Write(27, 1); log_event("+120v Pallet Backlight (K) OFF")
     m1Digital_Write(25, 1); log_event("+120v Blacklight (K) OFF")
+
+    # ---------------- Forest Hallway ----------------
+    # Pending pin assignments: smoke machine 6 (P, red/black),
+    # strobe (P, yellow), prop drop (P, blue).
+    # Lasers use an ESP32 MOSFET; no shutdown control is mapped here yet.
 
     # ---------------- Graveyard ----------------
     log_event("SHUTDOWN - Graveyard:")

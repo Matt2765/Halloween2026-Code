@@ -10,6 +10,13 @@ Received cue(uint32_t number,LightState value,uint32_t epoch) {
 }
 void buttonAt(uint32_t at,int level) {fakeNow=at;fakeButton=level;buttonTick(at);}
 int main() {
+ // Normal effects use 20% output; strobe has a separate 80% peak limit.
+ for(int level=0;level<=255;level++) {
+   output(uint8_t(level));
+   assert(brightness==level*51/255);
+   output(uint8_t(level),STROBE_BRIGHTNESS);
+   assert(brightness==level*204/255);
+ }
  setup(); assert(!synced && lightState==FLICKERING_ON);
  assert(command(cue(1,OFF,0))==INVALID);
  buttonAt(100,0);buttonAt(130,0);
@@ -32,7 +39,7 @@ int main() {
  fakeNow+=INTENSE_FLICKER_OUT_MS;lightTick(fakeNow);assert(lightState==OFF && brightness==0);
  setState(FLICKERING_ON,fakeNow);
  fakeNow+=FLICKER_ON_RAMP_MS;lightTick(fakeNow);
- for(int i=0;i<100;i++){fakeNow+=200;lightTick(fakeNow);assert(brightness>=170);}
+ for(int i=0;i<100;i++){fakeNow+=200;lightTick(fakeNow);assert(brightness>=170*MAX_BRIGHTNESS/255);}
  // Fade timers remain valid through millis wraparound.
  setState(FLICKER_OUT,0xffffff00);lightTick(0xffffff50);assert(lightState==FLICKER_OUT);
  lightTick(uint32_t(0xffffff00+FLICKER_OUT_MS));assert(lightState==OFF);
@@ -42,11 +49,11 @@ int main() {
  for(auto mode:{FLICKERING_ON,INTENSE_FLICKERING_ON}) {
    fakeNow=100000;setState(OFF,fakeNow);lightTick(fakeNow);
    setState(mode,fakeNow);lightTick(fakeNow);assert(rampingOn && brightness==0);
-   lightTick(fakeNow+FLICKER_ON_RAMP_MS/2);assert(brightness>0 && brightness<=127);
-   lightTick(fakeNow+FLICKER_ON_RAMP_MS);assert(!rampingOn && brightness>=12);
+   lightTick(fakeNow+FLICKER_ON_RAMP_MS/2);assert(brightness>0 && brightness<=MAX_BRIGHTNESS/2);
+   lightTick(fakeNow+FLICKER_ON_RAMP_MS);assert(!rampingOn && brightness>=12*MAX_BRIGHTNESS/255);
    // A lit lamp changes to either flicker mode with no new ramp.
    setState(SOLID_ON,fakeNow);lightTick(fakeNow);
-   setState(mode,fakeNow);lightTick(fakeNow);assert(!rampingOn && brightness>=12);
+   setState(mode,fakeNow);lightTick(fakeNow);assert(!rampingOn && brightness>=12*MAX_BRIGHTNESS/255);
  }
  fakeNow=200000;setState(OFF,fakeNow);lightTick(fakeNow);
  setState(FLICKERING_ON,fakeNow);lightTick(fakeNow);
@@ -59,12 +66,13 @@ int main() {
  // Ramp timers work across millis wrap too.
  setState(OFF,0xffffff00);lightTick(0xffffff00);setState(FLICKERING_ON,0xffffff00);
  lightTick(0xffffff00);assert(brightness==0);
- lightTick(uint32_t(0xffffff00+FLICKER_ON_RAMP_MS));assert(!rampingOn && brightness>=170);
+ lightTick(uint32_t(0xffffff00+FLICKER_ON_RAMP_MS));assert(!rampingOn && brightness>=170*MAX_BRIGHTNESS/255);
  // Strobe alternates bright and fully dark phases, with bounded random timings.
  fakeNow=300000;assert(command(cue(3,STROBE,4))==ACCEPTED && nextCommand==4);
  for(int i=0;i<30;i++) {
    lightTick(fakeNow);
-   assert(brightness==0 || brightness>=200);
+   assert(brightness==0 || brightness>=200*STROBE_BRIGHTNESS/255);
+   assert(brightness<=STROBE_BRIGHTNESS);
    assert(strobeLit==(i%2==0));
    uint32_t interval=nextFlicker-fakeNow;
    assert(interval>=(strobeLit?STROBE_ON_MIN_MS:STROBE_OFF_MIN_MS));
@@ -74,20 +82,20 @@ int main() {
  // A dark output gets a ramp even when the previous state was strobe.
  assert(brightness==0);setState(FLICKERING_ON,fakeNow);lightTick(fakeNow);
  assert(rampingOn && brightness==0);
- lightTick(fakeNow+FLICKER_ON_RAMP_MS);assert(!rampingOn && brightness>=170);
+ lightTick(fakeNow+FLICKER_ON_RAMP_MS);assert(!rampingOn && brightness>=170*MAX_BRIGHTNESS/255);
  // Both fades can quantize to zero before their logical OFF deadline.
  for(auto fade:{FLICKER_OUT,INTENSE_FLICKER_OUT}) {
    for(auto mode:{FLICKERING_ON,INTENSE_FLICKERING_ON}) {
      uint32_t duration=fade==FLICKER_OUT?FLICKER_OUT_MS:INTENSE_FLICKER_OUT_MS;
      fakeNow=450000;setState(fade,fakeNow);lightTick(fakeNow);
      assert(brightness>0);setState(mode,fakeNow);lightTick(fakeNow);
-     assert(!rampingOn && brightness>=12);
+     assert(!rampingOn && brightness>=12*MAX_BRIGHTNESS/255);
      fakeNow=500000;setState(fade,fakeNow);
      fakeNow+=duration-1;lightTick(fakeNow);
      assert(lightState==fade && brightness==0);
      setState(mode,fakeNow);lightTick(fakeNow);
      assert(rampingOn && brightness==0);
-     lightTick(fakeNow+FLICKER_ON_RAMP_MS);assert(!rampingOn && brightness>=12);
+     lightTick(fakeNow+FLICKER_ON_RAMP_MS);assert(!rampingOn && brightness>=12*MAX_BRIGHTNESS/255);
    }
  }
  // Command handling refreshes an expired fade even if the loop has not ticked yet.

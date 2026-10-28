@@ -15,11 +15,12 @@ class Buttons {
     if(!radio_.send(p)) radio_.diagnostic();
   }
 public:
-  bool begin(const char* id,const int* pins,const uint8_t* ids,uint8_t count,uint32_t debounce,uint32_t held,bool sleep) {
+  bool begin(const char* id,const int* pins,const uint8_t* ids,uint8_t count,uint32_t debounce,uint32_t held,bool sleep,
+             Radio::Handler handler=nullptr) {
     if(count>8) return false;
-    pins_=pins; ids_=ids; count_=count; debounce_=debounce; held_=held; sleep_=sleep;
+    pins_=pins; ids_=ids; count_=count; debounce_=debounce; held_=held; sleep_=sleep && handler==nullptr;
     for(uint8_t i=0;i<count_;i++) { if(ids[i]<1||ids[i]>8) return false; pinMode(pins[i],INPUT_PULLUP); }
-    lastActive_=began_=millis(); return radio_.begin(id,nullptr);
+    lastActive_=began_=millis(); return radio_.begin(id,handler);
   }
   void tick() {
     radio_.poll(); uint32_t now=millis(); bool any=false;
@@ -38,6 +39,11 @@ public:
         lastHeld_=now;
         for(uint8_t i=0;i<count_;i++) if(inputs_[i].stable) report(i,false);
       }
+    }
+    // Powered command receivers report releases periodically as well as presses.
+    if(!sleep_&&!any&&!initial_&&now-lastHeld_>=held_) {
+      lastHeld_=now;
+      for(uint8_t i=0;i<count_;i++) report(i,false);
     }
     if(sleep_&&!any&&!radio_.busy()&&now-lastActive_>=500) {
       radio_.diagnostic(); delay(5);
