@@ -128,6 +128,14 @@ Code received(const Received& r) {
       vals["neck"]=bool(b[10]); vals["eyes"]=bool(b[11]); vals["moving"]=bool(b[12]);
       vals["command_session"]=get32(b+13); vals["command_seq"]=get32(b+17); vals["ready"]=true; break;
     }
+    case GEORGE: {
+      const char* states[]={"off","standby","active"};
+      doc["kind"]="george"; vals["george_state"]=states[b[0]]; vals["controller_connected"]=bool(b[1]);
+      vals["mouth_angle"]=get16(b+2); vals["mouth_target"]=get16(b+4);
+      vals["neck_angle"]=get16(b+6); vals["neck_target"]=get16(b+8);
+      vals["eyes"]=bool(b[10]); vals["moving"]=bool(b[11]);
+      vals["command_session"]=get32(b+12); vals["command_seq"]=get32(b+16); vals["ready"]=true; break;
+    }
     case LANTERN: {
       const char* states[]={"off","solid_on","flickering_on","intense_flickering_on","flicker_out","intense_flicker_out","strobe"};
       doc["kind"]="lantern"; vals["lantern_state"]=states[b[0]];
@@ -176,6 +184,7 @@ void usbLine(const char* line) {
   if(!strcmp(op,"next")) operation=NEXT;
   if(!strcmp(op,"lantern")) operation=LANTERN_STATE;
   if(!strcmp(op,"pedro")) operation=PEDRO_POSE;
+  if(!strcmp(op,"george")) operation=GEORGE_POSE;
   if(!strcmp(op,"led")) operation=LED;
   if(!operation||!doc["value"].is<uint16_t>()||!doc["duration_ms"].is<uint32_t>()) {
     resultLine(cid,id,"rejected","invalid_command"); return;
@@ -186,19 +195,27 @@ void usbLine(const char* line) {
      !doc["neck"].is<bool>() || !doc["eyes"].is<bool>())) {
     resultLine(cid,id,"rejected","invalid_pedro_pose"); return;
   }
+  if(operation==GEORGE_POSE && (value>2 || !doc["mouth"].is<uint16_t>() || doc["mouth"].as<uint16_t>()>180 ||
+     !doc["neck"].is<uint16_t>() || doc["neck"].as<uint16_t>()>180 || !doc["eyes"].is<bool>())) {
+    resultLine(cid,id,"rejected","invalid_george_pose"); return;
+  }
   if((operation!=LANTERN_STATE && duration>30000) || ((operation==MOVE||operation==SET_DEFAULT)&&value>180) || (operation==PLAY&&value>200) ||
      (operation==LED && (value>1 || duration!=0)) ||
      (operation==LANTERN_STATE && (value>LANTERN_STATE_MAX || duration<1 || duration==0xffffffff || !doc["sync_generation"].is<uint32_t>()))) {
     resultLine(cid,id,"rejected","out_of_range"); return;
   }
-  if(operation==MOVE||operation==SET_DEFAULT||operation==PEDRO_POSE||operation==LED)
+  if(operation==MOVE||operation==SET_DEFAULT||operation==PEDRO_POSE||operation==GEORGE_POSE||operation==LED)
     radio.cancel(id,SUPERSEDED,operation==SET_DEFAULT?MOVE:operation);
   Request* request=nullptr;
   for(auto& r:requests) if(!r.used) { request=&r; break; }
   if(!request) { resultLine(cid,id,"rejected","queue_full"); return; }
-  auto p=radio.make(COMMAND,id,operation==LANTERN_STATE?15:operation==PEDRO_POSE?17:11,true); put32(p.payload,peer->session); p.payload[4]=operation;
+  auto p=radio.make(COMMAND,id,operation==LANTERN_STATE?15:operation==PEDRO_POSE?17:operation==GEORGE_POSE?16:11,true); put32(p.payload,peer->session); p.payload[4]=operation;
   put16(p.payload+5,value); put32(p.payload+7,duration);
   if(operation==LANTERN_STATE) put32(p.payload+11,doc["sync_generation"].as<uint32_t>());
+  if(operation==GEORGE_POSE) {
+    put16(p.payload+11,doc["mouth"].as<uint16_t>()); put16(p.payload+13,doc["neck"].as<uint16_t>());
+    p.payload[15]=doc["eyes"].as<bool>();
+  }
   if(operation==PEDRO_POSE) {
     put16(p.payload+11,doc["wings"].as<uint16_t>()); put16(p.payload+13,doc["beak"].as<uint16_t>());
     p.payload[15]=doc["neck"].as<bool>(); p.payload[16]=doc["eyes"].as<bool>();

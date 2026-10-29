@@ -114,7 +114,7 @@ def _store_device(shared, obj, now):
     session, seq = obj.get("session"), obj.get("seq")
     if not _valid_id(sid) or not _uint32(session) or not _uint32(seq) or not isinstance(vals, dict):
         raise ValueError("Invalid device identity or payload")
-    if kind not in ("tof", "button", "pir", "servo", "sprite", "lantern", "pedro", "dropdown"):
+    if kind not in ("tof", "button", "pir", "servo", "sprite", "lantern", "pedro", "dropdown", "george"):
         raise ValueError("Unsupported device kind")
     if kind == "button" and (type(vals.get("btn")) is not int or not 1 <= vals["btn"] <= 8 or type(vals.get("pressed")) is not bool):
         raise ValueError("Invalid button state")
@@ -140,6 +140,11 @@ def _store_device(shared, obj, now):
                             any(type(vals.get(key)) is not int or not 0 <= vals[key] <= 180
                                 for key in ("wings_angle", "wings_target", "beak_angle", "beak_target"))):
         raise ValueError("Invalid Pedro state")
+    if kind == "george" and (vals.get("george_state") not in PEDRO_STATES or
+                             any(type(vals.get(key)) is not bool for key in ("controller_connected", "eyes", "moving")) or
+                             any(type(vals.get(key)) is not int or not 0 <= vals[key] <= 180
+                                 for key in ("mouth_angle", "mouth_target", "neck_angle", "neck_target"))):
+        raise ValueError("Invalid George state")
     rec = shared.get(sid)
     mac = obj.get("mac")
     if not isinstance(mac, str) or not re.fullmatch(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}", mac):
@@ -567,6 +572,13 @@ def tx_to_id(device_id, payload):
                 type(payload.get(key)) is not bool for key in ("neck", "eyes")):
             raise ValueError("Pedro requires wings/beak angles and boolean neck/eyes outputs")
         op, value, duration = "pedro", PEDRO_STATES.index(state), payload.get("ramp_ms", 0)
+    elif payload.get("cmd") == "george":
+        state = payload.get("state")
+        if state not in PEDRO_STATES:
+            raise ValueError(f"George state must be one of {PEDRO_STATES}")
+        if any(type(payload.get(key)) is not int or not 0 <= payload[key] <= 180 for key in ("mouth", "neck")) or type(payload.get("eyes")) is not bool:
+            raise ValueError("George requires mouth/neck angles and boolean eyes output")
+        op, value, duration = "george", PEDRO_STATES.index(state), payload.get("ramp_ms", 0)
     elif payload.get("cmd") == "lantern":
         state = payload.get("state")
         if state not in LANTERN_STATES:
@@ -583,8 +595,8 @@ def tx_to_id(device_id, payload):
     elif payload.get("cmd", "play") == "play":
         op, value, duration = "play", payload.get("index", payload.get("file")), 0
     else:
-        raise ValueError("Supported commands: angle, set_default, led, pedro, lantern, play/index/file, next")
-    maximum = 2 if op == "pedro" else 180 if op in ("move", "set_default") else len(LANTERN_STATES) - 1 if op == "lantern" else 200
+        raise ValueError("Supported commands: angle, set_default, led, pedro, george, lantern, play/index/file, next")
+    maximum = 2 if op in ("pedro", "george") else 180 if op in ("move", "set_default") else len(LANTERN_STATES) - 1 if op == "lantern" else 200
     duration_maximum = 0xfffffffe if op == "lantern" else 30000
     if type(value) is not int or not 0 <= value <= maximum or type(duration) is not int or not 0 <= duration <= duration_maximum:
         raise ValueError("Command value or duration out of range")
@@ -622,6 +634,11 @@ def tx_to_id(device_id, payload):
                 _commands[cid] = dict(rec, status="rejected", reason="not_pedro")
                 return cid
             request.update({key: payload[key] for key in ("wings", "beak", "neck", "eyes")})
+        if op == "george":
+            if device["kind"] != "george":
+                _commands[cid] = dict(rec, status="rejected", reason="not_george")
+                return cid
+            request.update({key: payload[key] for key in ("mouth", "neck", "eyes")})
         if op == "lantern":
             if device["kind"] != "lantern":
                 _commands[cid] = dict(rec, status="rejected", reason="not_a_lantern")
@@ -672,6 +689,21 @@ def pedro(device_id="PEDRO1", *, state="standby", wings=5, beak=55, neck=False, 
     """
     return tx_to_id(device_id, {"cmd": "pedro", "state": state, "wings": wings,
                                "beak": beak, "neck": neck, "eyes": eyes, "ramp_ms": ramp_ms})
+
+
+def george(device_id="GEORGE1", *, state="standby", mouth=180, neck=80, eyes=False, ramp_ms=0):
+    """Atomic pose/keepalive; mouth and neck are servo angles in degrees.
+
+    Refresh at least every 500 ms. Off parks mouth=180, neck=80 (head forward), eyes=False.
+    Firmware enforces calibrated mouth 120..180 and neck 0..115 limits.
+    """
+    return tx_to_id(device_id, {"cmd": "george", "state": state, "mouth": mouth,
+                               "neck": neck, "eyes": eyes, "ramp_ms": ramp_ms})
+
+
+def get_george_state(device_id="GEORGE1"):
+    rec = get(device_id)
+    return dict(device_status(device_id), **(rec["vals"] if rec and rec["kind"] == "george" else {}))
 
 
 def lantern(command_id, state, lantern_ids=None):

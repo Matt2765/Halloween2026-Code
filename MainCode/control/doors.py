@@ -31,7 +31,7 @@ DOOR_SENSOR_IDS = {
 CLOSE_TRAVEL_S = {
     1: 9,
     2: 6,
-    3: 7,
+    3: 6.5,
     4: 4,
     5: 4,
     6: 6,

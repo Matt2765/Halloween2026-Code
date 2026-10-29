@@ -1,5 +1,14 @@
 # Unified ESP-NOW installation and protocol v1
 
+## George and shared animatronic service
+
+See [georgeNode/README.md](georgeNode/README.md) for wiring, service calls and
+wire layout. George adds type **12 GEORGE** (20-byte telemetry) and operation
+**8 GEORGE_POSE** (16-byte command), without changing existing wire shapes.
+Reflash the bridge for George support. Both characters share
+`MainCode/control/animatronic_service.py` and `MainCode/Animatronics/core.py`;
+character angles/choreography live in `Animatronics/pedro.py` and `george.py`.
+
 ## Dropdown extension
 
 The additive dropdown integration is documented in [dropdownNode/README.md](dropdownNode/README.md).
@@ -20,7 +29,7 @@ reflash for this extension. Type **10 Pedro** has a 21-byte telemetry payload;
 operation **6 Pedro pose** uses a 17-byte command for state, two servo angles
 and digital neck/eyes outputs. The existing 11-byte and lantern 15-byte command
 shapes are unchanged. USB adds `op:"pedro"` and `kind:"pedro"`; RSM adds
-`pedro(...)` and `get_pedro_state(...)`. `MainCode/pedro.py` is the Pedro-only
+`pedro(...)` and `get_pedro_state(...)`. `MainCode/Animatronics/pedro.py` is the Pedro-only
 replacement for the old Firmata controller. Python owns audio and motion timing;
 the node executes full poses and parks after 2.5 seconds without accepted Pedro
 commands. See its README for the exact schema, indicator states and run commands.

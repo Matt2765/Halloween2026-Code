@@ -53,6 +53,7 @@ def run():
 
             m1Digital_Write(26, 0) #wall lantern 1
             m1Digital_Write(24, 0) #wall lantern 2
+            m1Digital_Write(6, 0) #fireplace
 
             cabinMusic1 = play_audio("CabinRoom_Wall", "cabinAmbienceLong.wav", gain=.3, looping=True)
             cabinMusic2 = play_audio("CabinRoom_PA", "cabinAmbienceLong.wav", gain=.3, looping=True)
@@ -99,7 +100,7 @@ def run():
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
             blast_stop = threading.Event()
-            effect_threads.append(airBlasts(blast_stop))
+            #effect_threads.append(airBlasts(blast_stop))
 
             #start flickering wall lanterns here
             if not BreakCheck():
@@ -133,14 +134,15 @@ def run():
             t.sleep(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
-            wait(11.5)  # 35.5s elapsed
+            wait(12.5)  # 35.5s elapsed
 
             blast_stop.set()
 
             rsm.lantern(2, "intense_flicker_out")
             wallLanterns = False
+            m1Digital_Write(6, 1) #fireplace
 
-            wait(5)  # 40.5s elapsed
+            wait(4)  # 40.5s elapsed
 
             m1Digital_Write(22, 1) #strobe on
 
@@ -183,7 +185,7 @@ def run():
 
             wait(5)  # 55.3s elapsed
 
-            while not house.Basement_state == "ACTIVE":
+            while house.Basement_state != "ACTIVE":
                 if house.DoorState[3] == "CLOSED":
                     break
                 if not house.HouseActive or house.Demo:
@@ -191,6 +193,8 @@ def run():
                 wait(1)  # 1s polling interval until Basement is ACTIVE
 
             m1Digital_Write(22, 0) #strobe off
+
+            wait(15)
 
             for thread in effect_threads:
                 thread.join()

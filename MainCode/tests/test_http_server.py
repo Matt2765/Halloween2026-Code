@@ -99,6 +99,7 @@ class HTTPServerTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(json.loads(body), module.catalog())
             for request, expected in (({"kind":"relay", "id":"cabin_strobe", "value":True},200),
+                                      ({"kind":"animatronic", "id":"george", "value":"pose", "outputs":{"neck":90}},200),
                                       ({"kind":"invalid"},400)):
                 connection = HTTPConnection(*self.server.server_address, timeout=1)
                 try:
@@ -132,12 +133,15 @@ class HTTPServerTests(unittest.TestCase):
             "control": control,
             "control.doors": SimpleNamespace(DOOR_SOLENOID_PINS={}, DOOR_SENSOR_IDS={},
                                               DOOR_SENSOR_BYPASS={}),
-            "control.pedro_service": SimpleNamespace(pedro_status=lambda: {}),
+            "control.animatronic_service": SimpleNamespace(pedro_status=lambda: {"mode":"manual"},
+                                                                george_status=lambda: {"mode":"off"}),
         }
         with patch.dict(sys.modules, modules):
             status, body = self.get("/api/status")
             self.assertEqual(status, 200)
-            states = {r["id"]: r["state"] for r in json.loads(body)["rooms"]}
+            data = json.loads(body)
+            self.assertEqual(data["animatronics"], {"pedro":{"mode":"manual"}, "george":{"mode":"off"}})
+            states = {r["id"]: r["state"] for r in data["rooms"]}
             self.assertEqual(len(states), 7)
             self.assertEqual(states["CabinRoom"], "ACTIVE")
             self.assertEqual(states["Bathroom"], "STANDBY")

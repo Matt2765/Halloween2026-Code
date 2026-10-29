@@ -60,7 +60,7 @@ Code command(const Received& r) {
   state=PedroState(requestedState); controllerConnected=true; lastController=now;
   if(state==OFF) park(now);
   else {
-    wings.move(angleToUs(wingAngle),duration,now); beak.move(angleToUs(beakAngle),duration,now);
+    if(wings.target!=angleToUs(wingAngle) || !wings.moving()) wings.move(angleToUs(wingAngle),duration,now); if(beak.target!=angleToUs(beakAngle) || !beak.moving()) beak.move(angleToUs(beakAngle),duration,now);
     neck=p.payload[15]; eyes=p.payload[16]; output();
   }
   commandSession=p.session; commandSequence=p.seq; leds(now); report(); return ACCEPTED;

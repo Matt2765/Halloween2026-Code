@@ -1,7 +1,7 @@
 # Pedro ESP-NOW node and Python controller
 
 `pedroNode.ino` listens through the existing HauntProtocol USB transceiver.
-`MainCode/pedro.py` replaces the supplied `PedroWallace v3.py` for **Pedro only**.
+`MainCode/Animatronics/pedro.py` replaces the supplied `PedroWallace v3.py` for **Pedro only**.
 The original Downloads file is untouched. There is no Firmata or direct PC-to-bird
 serial connection. Python chooses audio, random motion and beak timing; the ESP
 only generates requested outputs, timed servo ramps and status indicators.
@@ -87,15 +87,15 @@ indicator stays solid while the connection is healthy.
 
 Audio now goes through `control.audio_manager.play_audio`, using the existing
 named channel maps, mixer, gain and output fallback behavior. The default route
-is **`CabinRoom_Wall`** (primary output index 1, zero based, in the current map).
-The default quip folder is this workspace's **`Assets/SoundDir/Quips`**.
+is **`Pedro`** (secondary output index 1, zero based, in the current map).
+The default quip folder is this workspace's **`Assets/SoundDir/Quips/Pedro`**.
 
 From a room, sequence, or the main system:
 
 ```python
-from control.pedro_service import start_pedro, stop_pedro, pedro_status
+from control.animatronic_service import start_pedro, stop_pedro, pedro_status
 
-start_pedro()  # Default CabinRoom_Wall route and configured channel gain.
+start_pedro()  # Default Pedro route and configured channel gain.
 stop_pedro()
 start_pedro("Basement", gain=0.8)  # Same channel names/gain semantics as play_audio.
 status = pedro_status()
@@ -137,20 +137,20 @@ From the repository root:
 arduino-cli compile --fqbn esp32:esp32:esp32 --libraries Esp32/libraries Esp32/transceiver
 arduino-cli compile --fqbn esp32:esp32:esp32 --libraries Esp32/libraries Esp32/pedroNode
 python -m pip install -r MainCode/requirements.txt
-python MainCode/pedro.py --port COM6 --channel CabinRoom_Wall
+python MainCode/Animatronics/pedro.py --port COM6 --channel CabinRoom_Wall
 ```
 
 The standalone CLI also uses the audio manager. It initializes mixers on the
-main thread, owns its own RSM, and uses `Assets/SoundDir/Quips` by default.
+main thread, owns its own RSM, and uses `Assets/SoundDir/Quips/Pedro` by default.
 Quip files may be MP3, WAV, OGG or FLAC. Pass `--quips` to change their folder,
 `--channel` for another named route, and `--gain` to override channel gain.
 
 ```powershell
-python MainCode/pedro.py --port COM6 --channel CabinRoom_Wall --gain 0.8 --once
-python MainCode/pedro.py --port COM6 --background "C:\path\2hrSWAMP.mp3"
-python MainCode/pedro.py --port COM6 --standby
-python MainCode/pedro.py --port COM6 --off
-python MainCode/pedro.py --simulate --standby
+python MainCode/Animatronics/pedro.py --port COM6 --channel CabinRoom_Wall --gain 0.8 --once
+python MainCode/Animatronics/pedro.py --port COM6 --background "C:\path\2hrSWAMP.mp3"
+python MainCode/Animatronics/pedro.py --port COM6 --standby
+python MainCode/Animatronics/pedro.py --port COM6 --off
+python MainCode/Animatronics/pedro.py --simulate --standby
 ```
 
 `--standby` and `--off` need no audio assets or mixer initialization. Simulation
@@ -168,9 +168,8 @@ state = rsm.get_pedro_state("PEDRO1")
 ```
 
 Send a complete pose at least every 500 ms. Each pose replaces all outputs;
-newer poses supersede older bridge deliveries. A repeated pose with a nonzero
-`ramp_ms` starts a new ramp from current output; the provided controller uses
-instantaneous poses (`ramp_ms=0`). An accepted result proves command acceptance,
+newer poses supersede older bridge deliveries. Repeated heartbeats with the same target preserve an in-progress ramp. The
+generic show uses instantaneous poses (`ramp_ms=0`). An accepted result proves command acceptance,
 not physical motion. There is no host command replay after USB reconnect.
 
 ## Additive wire extension

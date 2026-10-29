@@ -1,4 +1,4 @@
-﻿"""Hardware-free checks of manual output routing and input validation."""
+"""Hardware-free checks of manual output routing and input validation."""
 import ast
 from pathlib import Path
 import sys
@@ -30,7 +30,19 @@ class WebTestControlsTests(unittest.TestCase):
             lantern=Mock(return_value={'LANTERN1':'cid'}))
         control = ModuleType('control')
         control.arduino, control.dimmer_controller, control.remote_sensor_monitor = self.arduino, self.dim, self.rsm
-        self.patch = patch.dict(sys.modules, {'control':control})
+        self.characters = {}
+        for key, limits, rest in (
+            ('pedro', dict(wings=(5,115),beak=(10,55),neck=bool,eyes=bool),
+             dict(wings=5,beak=55,neck=False,eyes=False)),
+            ('george', dict(mouth=(120,180),neck=(0,115),eyes=bool),
+             dict(mouth=180,neck=80,eyes=False))):
+            self.characters[key] = SimpleNamespace(name=key.capitalize(),
+                controller_factory=SimpleNamespace(output_limits=limits,rest_pose=rest),
+                start=Mock(return_value=True), talk=Mock(return_value=True), stop=Mock(),
+                pose=Mock(return_value=True), status=Mock(return_value=dict(mode='off',error=None)))
+        control.animatronic_service = SimpleNamespace(**self.characters)
+        self.audio = SimpleNamespace(list_named_channels=lambda: ['Pedro','George','Basement'])
+        self.patch = patch.dict(sys.modules, {'control':control, 'control.audio_manager':self.audio})
         self.patch.start()
         self.addCleanup(self.patch.stop)
 
@@ -106,6 +118,79 @@ class WebTestControlsTests(unittest.TestCase):
         self.rsm.lantern.assert_called_with(7,'solid_on',['LANTERN1'])
         self.rsm.get_lantern_state.return_value={'available':False}
         with self.assertRaises(RuntimeError): self.execute('lantern','LANTERN1','off')
+
+    def test_catalog_contains_both_characters_and_their_actual_output_limits(self):
+        doors = SimpleNamespace(DOOR_SOLENOID_PINS={},DOOR_SENSOR_IDS={})
+        with patch.dict(sys.modules, {'control.doors':doors}):
+            entries = self.scope['catalog']()['animatronics']
+        self.assertEqual([entry['id'] for entry in entries], ['pedro','george'])
+        outputs = {entry['id']:{output['id']:output for output in entry['outputs']} for entry in entries}
+        self.assertEqual(outputs['george']['neck']['max'], 115)
+        self.assertEqual(outputs['george']['mouth']['min'], 120)
+        self.assertEqual(outputs['george']['mouth']['rest'], 180)
+        self.assertEqual(outputs['pedro']['neck']['type'], 'digital')
+        self.assertNotIn('led', outputs['george'])
+
+    def test_animatronic_show_talk_and_park_use_shared_service(self):
+        for key, character in self.characters.items():
+            for value, method in [('start',character.start), ('talk',character.talk)]:
+                result = self.execute('animatronic',key,value,channel='Basement',gain=0.4)
+                method.assert_called_once_with(channel='Basement',gain=0.4)
+                self.assertIn('requested',result['message'])
+            self.execute('animatronic',key,'stop')
+            character.stop.assert_called_once_with()
+
+    def test_manual_controls_route_angles_and_booleans_without_starting_a_show(self):
+        for key, outputs in [('george',dict(mouth=120,neck=90,eyes=True)),
+                             ('pedro',dict(wings=115,beak=10,neck=True,eyes=False))]:
+            self.execute('animatronic',key,'pose',outputs=outputs,ramp_ms=500)
+            character=self.characters[key]
+            character.pose.assert_called_once_with(ramp_ms=500,**outputs)
+            character.start.assert_not_called()
+            character.talk.assert_not_called()
+
+    def test_invalid_animatronic_requests_never_reach_service(self):
+        for outputs in [dict(neck=116), dict(mouth=119), dict(eyes=1), dict(neck=5.5),
+                        dict(neck=True), dict(wings=5), {}, None, ['neck']]:
+            with self.subTest(outputs=outputs), self.assertRaises(ValueError):
+                self.execute('animatronic','george','pose',outputs=outputs)
+        for ramp in [-1,30001,True,1.5]:
+            with self.subTest(ramp=ramp), self.assertRaises(ValueError):
+                self.execute('animatronic','george','pose',outputs={'neck':5},ramp_ms=ramp)
+        for key, action in [('unknown','start'),('george','__dict__')]:
+            with self.assertRaises(ValueError):
+                self.execute('animatronic',key,action)
+        self.characters['george'].pose.assert_not_called()
+
+    def test_talking_validates_routes_gain_and_disabled_audio(self):
+        for settings in [dict(channel='unknown'),dict(gain=-1),dict(gain=float('nan'))]:
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                self.execute('animatronic','george','start',**settings)
+        self.scope['house'].DISABLE_AUDIO_MANAGER=True
+        with self.assertRaisesRegex(RuntimeError,'Audio manager'):
+            self.execute('animatronic','george','talk')
+        self.characters['george'].talk.assert_not_called()
+        self.execute('animatronic','george','pose',outputs={'eyes':True})
+
+    def test_disabled_monitor_rejects_motion_but_allows_park(self):
+        self.rsm.healthy=lambda: {'disabled':True}
+        with self.assertRaisesRegex(RuntimeError,'Sensor monitor disabled'):
+            self.execute('animatronic','george','pose',outputs={'neck':90})
+        self.characters['george'].pose.assert_not_called()
+        self.execute('animatronic','george','stop')
+        self.characters['george'].stop.assert_called_once()
+
+    def test_service_failures_surface_instead_of_claiming_success(self):
+        character=self.characters['george']
+        character.pose.return_value=False
+        character.status.return_value={'error':'Hardware link unavailable'}
+        with self.assertRaisesRegex(RuntimeError,'Hardware link unavailable'):
+            self.execute('animatronic','george','pose',outputs={'neck':90})
+        character.start.return_value=False
+        character.status.return_value={'error':'No audio files in George'}
+        with self.assertRaisesRegex(RuntimeError,'No audio files'):
+            self.execute('animatronic','george','start')
+
 
 
 if __name__=='__main__': unittest.main()

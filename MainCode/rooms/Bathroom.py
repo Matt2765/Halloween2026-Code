@@ -51,14 +51,14 @@ def run():
             threading.Thread(target=ambientGlow, daemon=True, name="Bathroom Ambient Glow").start()
             m1Digital_Write(31, 0) #magic light
 
-            wait(20)  # 20s elapsed
+            wait(23)  # 20s elapsed
             
             dim(0, channel=5) #dynamic hallway orange
 
             setDoorState(3, "CLOSED")
             setDoorState(4, "OPEN")
 
-            wait(42)  # 62s elapsed; voice over time
+            wait(23)  # 62s elapsed; voice over time
 
             rsm.lantern(4, "intense_flickering_on")
 
@@ -75,7 +75,7 @@ def run():
             m1Digital_Write(33, 0) #mirror light
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1, threaded=True)
 
-            wait(11.5)  # 78.5s elapsed; bloody mary stare
+            wait(8.5)  # 78.5s elapsed; bloody mary stare
 
             m1Digital_Write(35, 0) #strobe
 
@@ -91,11 +91,11 @@ def run():
 
             m1Digital_Write(33, 1) #mirror light
 
-            wait(6.5)  # 85s elapsed; victim performance
+            wait(3)  # 85s elapsed
 
             m1Digital_Write(35, 1) #strobe
 
-            wait(4.5)  # 89.5s elapsed; victim performance
+            wait(6)  # 89.5s elapsed; victim performance
 
             m1Digital_Write(35, 0) #strobe
 
@@ -114,14 +114,15 @@ def run():
 
             log_event("waiting...")
 
-            wait(5)  
+            wait(2)  
             rsm.lantern(6, "intense_flickering_on")
 
             setDoorState(5, "OPEN")
 
+            house.Bathroom_state = "STANDBY"
+
             #dim(25, channel=5) #dynamic hallway orange
 
-            val = ""
             while rsm.get_pir_state("PIR3")["triggered"] is False: #door 4 sens
                 if BreakCheck():
                     break
@@ -133,8 +134,6 @@ def run():
             house.Basement_state = "ACTIVE"
 
             m1Digital_Write(35, 1) #strobe
-
-            house.Bathroom_state = "STANDBY"
 
             if BreakCheck() or house.Demo:
                 if house.Demo:

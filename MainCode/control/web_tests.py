@@ -1,4 +1,4 @@
-﻿"""Allowlisted manual test controls for the local web UI.
+"""Allowlisted manual test controls for the local web UI.
 
 Relay polarity follows shutdown.py (Cabin strobe is active HIGH). Add wiring
 assignments here only after confirming them; never expose arbitrary pin writes.
@@ -39,6 +39,9 @@ RELAYS = [
     ("pallet_backlight", "Pallet Hallway", "Pallet backlight", 27, 0),
     ("pallet_blacklight", "Pallet Hallway", "Blacklight", 25, 0),
     ("grave_smoke", "Graveyard", "Industrial smoke machine 5", 58, 0),
+    ("forest_smoke", "Forest Hallway", "Smoke machine 6", 57, 0),
+    ("forest_strobe", "Forest Hallway", "Strobe", 8, 0),
+    ("forest_prop_drop", "Forest Hallway", "Prop drop", 42, 0),
 ]
 DIMMERS = [
     (1, "Cabin Room", "Ambient light 1"), (2, "Cabin Room", "Grandma light"),
@@ -51,9 +54,6 @@ UNASSIGNED_CONTROLS = [
     ("Dynamic Hallway", "Blacklights", "Cable I, red; Arduino pin needed"),
     ("Dynamic Hallway", "Smoke machine 2", "Cable J, red/black; Arduino pin needed"),
     ("Forest Hallway", "Lasers", "ESP32 MOSFET; device ID and command mapping needed"),
-    ("Forest Hallway", "Smoke machine 6", "Cable P, red/black; Arduino pin needed"),
-    ("Forest Hallway", "Strobe", "Cable P, yellow; Arduino pin needed"),
-    ("Forest Hallway", "Prop drop", "Cable P, blue; Arduino pin needed"),
     ("Graveyard", "Wendigo", "Device/pin and command mapping needed"),
 ]
 UNMAPPED = [f"{room}: {label} - {detail}" for room, label, detail in UNASSIGNED_CONTROLS]
@@ -66,7 +66,16 @@ def catalog():
     from control.doors import DOOR_SOLENOID_PINS, DOOR_SENSOR_IDS
     from control.audio_manager import list_named_channels
     from control import remote_sensor_monitor as rsm
+    from control import animatronic_service as anim
+    characters = {"pedro": anim.pedro, "george": anim.george}
     return dict(
+        animatronics=[dict(id=key, name=character.name, outputs=[
+            dict(id=output, label=output.capitalize(), type="digital", rest=character.controller_factory.rest_pose[output])
+            if limit is bool else
+            dict(id=output, label=output.capitalize(), type="angle", min=limit[0], max=limit[1],
+                 rest=character.controller_factory.rest_pose[output])
+            for output, limit in character.controller_factory.output_limits.items()])
+            for key, character in characters.items()],
         relays=[dict(id=k, room=r, label=l, pin=p) for k, r, l, p, _ in RELAYS],
         dimmers=[dict(id=c, room=r, label=l) for c, r, l in DIMMERS],
         doors=[dict(id=i, sensor=DOOR_SENSOR_IDS[i], room=DOOR_ROOMS.get(i, "Doors"))
@@ -160,8 +169,55 @@ def execute(request):
                 gain = _number(request.get("gain", 0.2), 0, 1)
                 audio.play_audio(f"{key}: Speaker test. {key}", gain=gain)
                 result["message"] = "Speaker test requested"
+        elif kind == "animatronic":
+            from control import animatronic_service as anim
+            if key not in ("pedro", "george"):
+                raise ValueError("Unknown animatronic")
+            character = anim.pedro if key == "pedro" else anim.george
+            if value not in ("start", "stop", "talk", "pose"):
+                raise ValueError("Unknown animatronic action")
+            if value == "stop":
+                character.stop()
+                result["message"] = f"{character.name} stop/park requested"
+            else:
+                if rsm.healthy()["disabled"]:
+                    raise RuntimeError("Sensor monitor disabled; command was not sent")
+                if value == "pose":
+                    outputs = request.get("outputs")
+                    limits = character.controller_factory.output_limits
+                    if not isinstance(outputs, dict) or not outputs or any(output not in limits for output in outputs):
+                        raise ValueError("Unknown or missing animatronic outputs")
+                    for output, setting in outputs.items():
+                        limit = limits[output]
+                        if limit is bool:
+                            if type(setting) is not bool:
+                                raise ValueError(f"{output} requires ON/OFF")
+                        elif type(setting) is not int or not limit[0] <= setting <= limit[1]:
+                            raise ValueError(f"{output} requires a whole angle in {limit[0]}..{limit[1]}")
+                    ramp = request.get("ramp_ms", 0)
+                    if type(ramp) is not int or not 0 <= ramp <= 30000:
+                        raise ValueError("Ramp must be a whole number in 0..30000 ms")
+                    accepted = character.pose(ramp_ms=ramp, **outputs)
+                    result["message"] = f"{character.name} manual pose requested; check live status"
+                else:
+                    from control.audio_manager import list_named_channels
+                    if house.DISABLE_AUDIO_MANAGER:
+                        raise RuntimeError("Audio manager is disabled in house_state.py")
+                    channel = request.get("channel", character.name)
+                    if channel not in list_named_channels():
+                        raise ValueError("Unknown speaker route")
+                    gain = _number(request.get("gain", 1), 0, 1)
+                    action = character.start if value == "start" else character.talk
+                    accepted = action(channel=channel, gain=gain)
+                    result["message"] = (f"{character.name} " +
+                        ("talking show requested" if value == "start" else "one quip requested") +
+                        "; check live status")
+                if not accepted:
+                    raise RuntimeError(character.status().get("error") or f"{character.name} command could not start")
+            result["animatronic"] = character.status()
         elif kind == "pedro":
-            from control.pedro_service import start_pedro, stop_pedro
+            # Keep existing clients compatible; the current UI uses the shared API.
+            from control.animatronic_service import start_pedro, stop_pedro
             if value == "start":
                 if not start_pedro():
                     raise RuntimeError("Pedro could not start; check the system log")

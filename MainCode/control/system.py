@@ -17,9 +17,10 @@ from utils.tools import log_event, BreakCheck, wait, randMixedNum
 from control.doors import spawn_doors
 import control.dimmer_controller as dim
 from control.shutdown import shutdown
-from control.pedro_service import start_pedro, stop_pedro
+from control.animatronic_service import start_pedro, stop_all
 import random
 from control.arduino import m1Digital_Write
+from control import remote_sensor_monitor as rsm
 
 def initialize_system():
     while True:
@@ -65,7 +66,7 @@ def initialize_system():
         while house.systemState == "ONLINE":
             t.sleep(1)
 
-        stop_pedro()
+        stop_all()
         
         log_event("[System] All non-persistent services stopped. Most likely due to shutdown.")
             
@@ -138,7 +139,7 @@ def StartHouse():
             name=ForestHallway.__name__.split('.')[-1]
         ).start()
 
-        noScareDetector(threaded=True)
+        #noScareDetector(threaded=True)
 
         while house.HouseActive:
             if BreakCheck():

@@ -9,6 +9,7 @@ from control.houseLights import toggleHouseLights
 from control import dimmer_controller as dim
 import threading
 import random
+from control import animatronic_service
 
 _ambient_workers = {}
 _ambient_lock = threading.RLock()
@@ -71,20 +72,54 @@ def run():
                 break
 
             # Sequencing here
-            while not house.Basement_state == "ACTIVE":
+            while house.Basement_state != "ACTIVE":
                 if house.Demo or not house.HouseActive:
                     break
                 wait(1)  # 1 second polling interval until ACTIVE
 
+            basementMusic = play_audio("Basement", "ES_Crypta - Jo Wandrini.wav", gain=1, looping=True)
+
             m1Digital_Write(3, 0)
+
+            if not house.Demo: #wait 10 secs or if dynamic hallway button pressed, start basement VO
+                for i in range(100):
+                    if rsm.get_button_value("BTN4") or BreakCheck():
+                        break
+                    wait(.1)
+
+            wait(5)
+
+            file = 0
+            looping = True
 
             while True:
                 if BreakCheck():
                     return
-                distance = rsm.get_TOF_value("TOF1")
-                if distance is not None and distance <= 90:
+
+                vo_files = ["Booming_voice_01-reverb.wav", 
+                            "Booming_voice_02-reverb.wav",
+                            "Booming_voice_03-reverb.wav",
+                            "Booming_voice_04-reverb.wav",
+                            "Booming_voice_05-reverb.wav",
+                            ]
+                
+                play_audio("Basement", vo_files[file], threaded=False, gain=1)
+                if file < 4:
+                    file += 1
+
+                for i in range(10):
+                    distance = rsm.get_TOF_value("TOF1")
+                    if distance is not None and distance <= 90:
+                        looping = False
+                        break
+                    t.sleep(.1)
+                    if BreakCheck():
+                        break
+                if not looping or BreakCheck():
                     break
-                wait(1)
+
+            if basementMusic is not None:
+                basementMusic.fade_out(seconds=5)
 
             play_audio("Basement", "basementExamplev3.wav", gain=1)
             play_audio("primary_LFE", "basementExamplev3.wav", gain=1)
@@ -128,7 +163,11 @@ def run():
 
             m1Digital_Write(61, 0) #smoke machine
 
-            wait(2.5)
+            wait(2)
+
+            threading.Thread(target=awakenGeorge, daemon=True).start()
+
+            t.sleep(.5)
 
             stopAmbientFlicker(7)
 
@@ -274,3 +313,47 @@ def ambientFlicker(channel, stop_event=None, ramp_seconds=0.0):
                     #log_event(value)
     finally:
         dim.dim(0, channel=channel)
+
+def awakenGeorge():
+    movement_stop = threading.Event()
+
+    def neck():
+        for _ in range(80):
+            if movement_stop.is_set() or BreakCheck():
+                return
+            animatronic_service.george.neck(random.randint(0, 115))
+            if movement_stop.wait(randMixedNum(.5, 2)):
+                return
+
+    def eyes():
+        for _ in range(40):
+            if movement_stop.is_set() or BreakCheck():
+                return
+            animatronic_service.george.eyes(True)
+            if movement_stop.wait(randMixedNum(.5, 2)) or BreakCheck():
+                return
+            animatronic_service.george.eyes(False)
+            if movement_stop.wait(randMixedNum(.05, .1)):
+                return
+
+    workers = []
+    try:
+        for target in (eyes, neck):
+            worker = threading.Thread(target=target, daemon=True,
+                                      name=f"George {target.__name__}")
+            worker.start()
+            workers.append(worker)
+
+        animatronic_service.george.mouth(120)
+        wait(15)
+    finally:
+        # Finish manual calls before talk() takes ownership of motion/audio.
+        movement_stop.set()
+        for worker in workers:
+            worker.join(timeout=3)
+
+    if any(worker.is_alive() for worker in workers):
+        log_event("[Basement] George awakening movement has not stopped; skipping dialogue")
+        return
+    if not BreakCheck():
+        animatronic_service.george.talk(channel="Basement")

@@ -113,6 +113,7 @@ secondary_channels: ChannelMap = {
     "PalletHallway": {"index": 6, "gain": 1.0},  # Surround left
     "ForestHallway": {"index": 2, "gain": 1.0},  # Center
     "Pedro": {"index": 1, "gain": 1.0},  # Front right
+    "George": {"index": 1, "gain": 1.0},  # Default front right; independently routable
     "Graveyard": {"index": 4, "gain": 1.0},  # Surround back left
     "secondary_FL": {"index": 0, "gain": 1.0},
     "secondary_FR": {"index": 1, "gain": 1.0},

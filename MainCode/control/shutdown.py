@@ -6,7 +6,7 @@ from control.houseLights import toggleHouseLights
 from control.audio_manager import play_audio, stop_all_audio
 from control.arduino import m1Digital_Write
 from utils.thread_diagnostics import dump_threads
-from control.pedro_service import stop_pedro
+from control.animatronic_service import stop_all
 from control.doors import DOOR_SOLENOID_PINS, apply_door_shutdown_state
 from control.dimmer_controller import dim
 
@@ -17,7 +17,7 @@ def shutdown():
     house.testing = False
     for door in DOOR_SOLENOID_PINS:
         apply_door_shutdown_state(door)
-    stop_pedro()
+    stop_all()
 
     # DIM1 Cabin ambient, DIM2 Grandma, DIM3 Basement wall cracks,
     # DIM4/5 Dynamic Hallway ambient, DIM6 Bathroom ambient,
@@ -72,8 +72,10 @@ def shutdown():
     m1Digital_Write(25, 1); log_event("+120v Blacklight (K) OFF")
 
     # ---------------- Forest Hallway ----------------
-    # Pending pin assignments: smoke machine 6 (P, red/black),
-    # strobe (P, yellow), prop drop (P, blue).
+    log_event("SHUTDOWN - Forest Hallway:")
+    m1Digital_Write(57, 1); log_event("Smoke Machine 6 (P) OFF")
+    m1Digital_Write(8, 1); log_event("+120v Strobe (P) OFF")
+    m1Digital_Write(42, 1); log_event("+12v Prop Drop (P) OFF")
     # Lasers use an ESP32 MOSFET; no shutdown control is mapped here yet.
 
     # ---------------- Graveyard ----------------

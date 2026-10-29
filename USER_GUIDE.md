@@ -904,12 +904,12 @@ Use **Start Pedro** / **Stop Pedro** in the main GUI or HTTP remote page while
 ONLINE. These controls are independent of START HOUSE. Shutdown stops Pedro's
 voice and motion. Stop parks him and keeps an off heartbeat for a solid red LED.
 
-His voice uses the existing audio manager, default named route `CabinRoom_Wall`,
-and the recordings in `Assets/SoundDir/Quips`. Change the default in
-`MainCode/control/pedro_service.py`, or specify a route from your sequence:
+His voice uses the existing audio manager, default named route `Pedro`,
+and the recordings in `Assets/SoundDir/Quips/Pedro`. Change the speaker map in
+`MainCode/control/audio_manager.py`, or specify a route from your sequence:
 
 ```python
-from control.pedro_service import start_pedro, stop_pedro
+from control.animatronic_service import start_pedro, stop_pedro
 start_pedro("CabinRoom_Wall", gain=0.8)
 # Later:
 stop_pedro()
@@ -919,3 +919,47 @@ Stop before changing routes. Repeated starts do not create duplicate workers.
 The service shares the main ESP bridge connection; do not also run Pedro's
 standalone CLI against that port. See [Pedro setup](Esp32/pedroNode/README.md)
 for optional ambience, standalone commands, wiring and protocol details.
+
+
+## George and manual animatronic control
+
+Both characters now live under `MainCode/Animatronics`, behind the shared
+`control.animatronic_service`. Pedro keeps his generic show this year and
+starts with the house. George is opt-in:
+
+```python
+from control import animatronic_service
+
+animatronic_service.george.start()  # Random quips, talking and idle movement.
+animatronic_service.george.stop()
+animatronic_service.george.neck(90)  # Manual servo angle in degrees.
+animatronic_service.george.mouth(120)
+animatronic_service.george.eyes(True)
+animatronic_service.george.talk("Quip01.mp3")  # One line, then park.
+animatronic_service.pedro.wings(115)
+animatronic_service.pedro.neck(True)  # Pedro's neck remains digital.
+animatronic_service.stop_all()
+```
+
+Manual calls stop that character's generic show and hold a complete pose through
+shared wireless heartbeats. George uses eyes GPIO13, mouth GPIO14, neck GPIO26.
+His old William Wallace calibration is mouth 120 open/180 closed, neck 80 parked (head facing forward)
+and 5..115 for idle movement. Quips come from `Assets/SoundDir/Quips/George`;
+put his recordings there before using the talking show. The default George
+speaker route currently shares Pedro's secondary output index 1; pass
+`channel=...` to choose another existing route.
+
+Both characters park at shutdown. Flash George and the updated USB bridge;
+reflash Pedro for the same-target ramp preservation improvement. See
+[George setup and API](Esp32/georgeNode/README.md) for build commands and details.
+
+
+### Animatronic web tests
+
+Open **Test > Animatronics** for Pedro and George. Each has Start talking,
+Play one quip, Stop & park, selectable speaker route/gain, and live status.
+Manual controls set calibrated servo angles or digital On/Off outputs and hold
+the pose after stopping that character's talking show. Stop the show before
+changing voice settings. **Test > Speakers** is a separate group containing
+speaker audio tests only. Restart MainCode and refresh the web page to load
+these controls.

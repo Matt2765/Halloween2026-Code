@@ -15,9 +15,9 @@ inline FakeEsp ESP;
 namespace haunt {
 struct Received {Packet packet;};
 struct Radio {
- Registry registry; uint32_t session=1;
- bool begin(const char*,Code(*)(const Received&)){return true;}
- Packet make(Type type,const char* dst,uint8_t length){Packet p;p.type=type;p.length=length;strcpy(p.src,"PEDRO1");strcpy(p.dst,dst);return p;}
+ Registry registry; uint32_t session=1; char id[16]="PEDRO1";
+ bool begin(const char* deviceId,Code(*)(const Received&)){strcpy(id,deviceId);return true;}
+ Packet make(Type type,const char* dst,uint8_t length){Packet p;p.type=type;p.length=length;strcpy(p.src,id);strcpy(p.dst,dst);return p;}
  bool send(const Packet& p){return shape(p);}
  void poll(){}
  void diagnostic(){}

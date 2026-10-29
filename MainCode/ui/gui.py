@@ -10,7 +10,7 @@ from utils.tools import log_event
 
 # NEW: read-only sensor values
 from control import remote_sensor_monitor as rsm  # minimal addition
-from control.pedro_service import start_pedro, stop_pedro, pedro_status
+from control.animatronic_service import start_pedro, stop_pedro, pedro_status
 
 
 def demoEvent(room):
