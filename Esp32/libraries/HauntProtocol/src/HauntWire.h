@@ -4,9 +4,9 @@
 #include <string.h>
 namespace haunt {
 constexpr size_t ID_BYTES = 16, HEADER = 46, MAX_PAYLOAD = 64;
-enum Type : uint8_t { TOF=1, BUTTON=2, PIR=3, SERVO=4, SPRITE=5, COMMAND=6, ACK=7, DIAGNOSTIC=8, LANTERN=9, PEDRO=10, DROPDOWN=11, GEORGE=12 };
+enum Type : uint8_t { TOF=1, BUTTON=2, PIR=3, SERVO=4, SPRITE=5, COMMAND=6, ACK=7, DIAGNOSTIC=8, LANTERN=9, PEDRO=10, DROPDOWN=11, GEORGE=12, MOSFET=13 };
 enum Code : uint8_t { ACCEPTED=0, INVALID=1, SUPERSEDED=2, WRONG_SESSION=3, CONFLICT=4, QUEUE_FULL=5, UNCONFIRMED=6 };
-enum Op : uint8_t { MOVE=1, SET_DEFAULT=2, PLAY=3, NEXT=4, LANTERN_STATE=5, PEDRO_POSE=6, LED=7, GEORGE_POSE=8 };
+enum Op : uint8_t { MOVE=1, SET_DEFAULT=2, PLAY=3, NEXT=4, LANTERN_STATE=5, PEDRO_POSE=6, LED=7, GEORGE_POSE=8, MOSFET_SET=9 };
 constexpr uint8_t ACK_REQUIRED = 1;
 constexpr uint8_t LANTERN_STATE_MAX = 6; // Existing 0..5 unchanged; 6 = strobe.
 inline bool newer(uint32_t a, uint32_t b) { return int32_t(a-b)>0; }
@@ -15,6 +15,8 @@ inline void put16(uint8_t* p, uint16_t v) { p[0]=v; p[1]=v>>8; }
 inline void put32(uint8_t* p, uint32_t v) { for(int i=0;i<4;i++) p[i]=v>>(8*i); }
 inline uint16_t get16(const uint8_t* p) { return uint16_t(p[0]) | uint16_t(p[1])<<8; }
 inline uint32_t get32(const uint8_t* p) { return uint32_t(p[0]) | uint32_t(p[1])<<8 | uint32_t(p[2])<<16 | uint32_t(p[3])<<24; }
+inline void put64(uint8_t* p, uint64_t v) { put32(p,uint32_t(v)); put32(p+4,uint32_t(v>>32)); }
+inline uint64_t get64(const uint8_t* p) { return uint64_t(get32(p)) | uint64_t(get32(p+4))<<32; }
 inline bool validId(const char* id, bool all=false) {
   if(!id) return false;
   size_t n=0;
@@ -48,14 +50,16 @@ inline bool shape(const Packet& p) {
       b[10]<=1 && b[11]<=1 && b[12]<=1;
     case GEORGE: return p.length==20 && b[0]<=2 && b[1]<=1 &&
       get16(b+2)<=180 && get16(b+4)<=180 && get16(b+6)<=180 && get16(b+8)<=180 && b[10]<=1 && b[11]<=1;
+    case MOSFET: return p.length==24 && get64(b)!=0 && (get64(b)>>40)==0 && (get64(b+8)&~get64(b))==0;
     case COMMAND: return p.flags==ACK_REQUIRED && strcmp(p.dst,"*") &&
-      ((p.length==11 && b[4]!=LANTERN_STATE && b[4]!=PEDRO_POSE && b[4]!=GEORGE_POSE &&
+      ((p.length==11 && b[4]!=LANTERN_STATE && b[4]!=PEDRO_POSE && b[4]!=GEORGE_POSE && b[4]!=MOSFET_SET &&
         (b[4]!=LED || (get16(b+5)<=1 && get32(b+7)==0))) ||
        (p.length==15 && b[4]==LANTERN_STATE && get16(b+5)<=LANTERN_STATE_MAX && get32(b+7)>=1 && get32(b+7)<0xffffffff) ||
        (p.length==17 && b[4]==PEDRO_POSE && get16(b+5)<=2 && get32(b+7)<=30000 &&
         get16(b+11)<=180 && get16(b+13)<=180 && b[15]<=1 && b[16]<=1) ||
        (p.length==16 && b[4]==GEORGE_POSE && get16(b+5)<=2 && get32(b+7)<=30000 &&
-        get16(b+11)<=180 && get16(b+13)<=180 && b[15]<=1));
+        get16(b+11)<=180 && get16(b+13)<=180 && b[15]<=1) ||
+       (p.length==12 && b[4]==MOSFET_SET && get16(b+5)<=1 && get32(b+7)==0 && b[11]<40));
     case ACK: return p.length==9 && !p.flags && b[8]<=UNCONFIRMED && strcmp(p.dst,"*");
     case DIAGNOSTIC: return p.length==24;
     default: return false;
@@ -80,12 +84,17 @@ inline bool decode(const uint8_t* in, size_t n, Packet& p) {
   p.session=get32(in+38); p.seq=get32(in+42); memcpy(p.payload,in+HEADER,p.length);
   return shape(p);
 }
-// LED and servo commands must not supersede one another when radio delivery reorders them.
-inline uint8_t stream(const Packet& p) { return p.type==DIAGNOSTIC ? 9 : p.type==BUTTON ? p.payload[0] : p.type==COMMAND && p.payload[4]==LED ? 10 : 0; }
+// Each MOSFET GPIO has its own ordering stream, independent of other outputs.
+constexpr size_t STREAM_COUNT=51; // Original 0..10 plus GPIO0..39 at 11..50.
+inline uint8_t stream(const Packet& p) {
+  return p.type==DIAGNOSTIC ? 9 : p.type==BUTTON ? p.payload[0] :
+    p.type==COMMAND && p.payload[4]==LED ? 10 :
+    p.type==COMMAND && p.payload[4]==MOSFET_SET ? 11+p.payload[11] : 0;
+}
 struct PeerState {
   char id[16]={}; uint8_t mac[6]={}; uint32_t session=0, heard=0;
-  bool conflict=false, initialized[11]={}, seen=false,continuous=false;
-  uint32_t seq[11]={}, gaps=0,lastSeen=0;
+  bool conflict=false, initialized[STREAM_COUNT]={}, seen=false,continuous=false;
+  uint32_t seq[STREAM_COUNT]={}, gaps=0,lastSeen=0;
 };
 // Lifetime registry: fail closed at capacity; do not evict ordering/conflict evidence.
 struct Registry {

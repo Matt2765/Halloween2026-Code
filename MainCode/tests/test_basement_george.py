@@ -26,18 +26,29 @@ class BasementGeorgeTests(unittest.TestCase):
                                   eyes=Mock(side_effect=lambda on: events["eyes"].set()))
         def wait(seconds):
             self.assertEqual(seconds, 15)
+            if george.talk.called:
+                # The second 15-second wait must follow speech completion.
+                self.assertGreaterEqual(george.status.call_count, 2)
+                self.assertTrue(all(not worker.is_alive() for worker in workers))
+                george.stop.assert_not_called()
             self.assertTrue(all(event.wait(1) for event in events.values()))
             state["cancelled"] = cancelled
             if fail_wait:
                 raise RuntimeError("Interrupted sequence")
         def talk(**kwargs):
             self.assertTrue(all(not worker.is_alive() for worker in workers))
-        george.talk = Mock(side_effect=talk)
+            return True
+        george.talk = Mock(side_effect=talk, return_value=True)
+        george.start_idle = Mock(return_value=True)
+        george.stop = Mock()
+        george.status = Mock(side_effect=[{"running":True}, {"running":False}])
         scope = dict(animatronic_service=SimpleNamespace(george=george),
                      threading=SimpleNamespace(Thread=worker_factory,Event=threading.Event),
-                     BreakCheck=lambda: state["cancelled"], wait=wait, log_event=Mock(),
+                     BreakCheck=lambda: state["cancelled"], wait=Mock(side_effect=wait), log_event=Mock(),
+                     t=SimpleNamespace(sleep=Mock()),
                      random=SimpleNamespace(randint=lambda low, high: high),
                      randMixedNum=lambda low, high: low)
+        self.sequence_wait = scope["wait"]
         exec(compile(tree, str(path), "exec"), scope)
         return scope["awakenGeorge"], george, workers
 
@@ -49,7 +60,11 @@ class BasementGeorgeTests(unittest.TestCase):
         george.mouth.assert_called_once_with(120)
         self.assertTrue(george.neck.called)
         self.assertTrue(george.eyes.called)
+        george.start_idle.assert_called_once_with()
         george.talk.assert_called_once_with(channel="Basement")
+        self.assertEqual(george.status.call_count, 2)
+        self.assertEqual(self.sequence_wait.call_args_list, [unittest.mock.call(15), unittest.mock.call(15)])
+        george.stop.assert_called_once_with()
 
     def test_cancelled_sequence_stops_workers_without_starting_speech(self):
         awaken, george, workers = self.load(cancelled=True)
@@ -63,6 +78,22 @@ class BasementGeorgeTests(unittest.TestCase):
             awaken()
         self.assertTrue(all(not worker.is_alive() for worker in workers))
         george.talk.assert_not_called()
+
+    def test_failed_talk_parks_without_waiting_for_speech(self):
+        awaken, george, workers = self.load()
+        george.talk.side_effect = None
+        george.talk.return_value = False
+        awaken()
+        george.status.assert_not_called()
+        george.stop.assert_called_once_with()
+
+    def test_speech_wait_error_still_parks(self):
+        awaken, george, workers = self.load()
+        george.status.side_effect = RuntimeError("Playback status failed")
+        with self.assertRaisesRegex(RuntimeError, "Playback status failed"):
+            awaken()
+        george.stop.assert_called_once_with()
+
 
 
 if __name__ == "__main__":

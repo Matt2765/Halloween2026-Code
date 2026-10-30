@@ -88,7 +88,7 @@ def StartHouse():
         toggleHouseLights(False)
         setDoorState(5, "OPEN")
 
-        start_pedro(gain=1)
+        #start_pedro(gain=1)
 
         threading.Thread(
             target=CabinRoom.run, 

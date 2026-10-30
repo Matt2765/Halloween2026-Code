@@ -1,5 +1,24 @@
 # Unified ESP-NOW installation and protocol v1
 
+## PIR + generic extender
+
+`PIR+extenderNode` combines the existing PIR reports with bidirectional relay of
+every node type. See [setup and flashing](PIR+extenderNode/README.md). The shared
+radio transport supports bounded multi-hop envelopes while leaving direct v1
+packets unchanged. For MOSFET1 range extension, reflash the converted PIR, COM6
+bridge and MOSFET1; other directly connected nodes do not require a reflash.
+Endpoints need the updated library only when they will use extended paths.
+
+## Generic MOSFET extension
+
+See [mosfetNode/README.md](mosfetNode/README.md). Adds type **13 MOSFET**
+(24-byte telemetry with configured/ON GPIO bitmaps) and operation **9 MOSFET_SET**
+(12-byte reliable command with one GPIO and ON/OFF state). GPIOs have independent
+ordering streams and pin-specific retry cancellation. RSM exposes
+`mosfet(node_ids, pin, on)` and `get_mosfet_state(node_id)`. Flash the updated
+bridge plus the new node; other nodes keep their existing formats. Outputs
+start OFF and latch until explicitly changed or the node restarts.
+
 ## George and shared animatronic service
 
 See [georgeNode/README.md](georgeNode/README.md) for wiring, service calls and

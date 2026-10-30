@@ -29,11 +29,11 @@ DOOR_SENSOR_IDS = {
 }
 # Per-door timing in seconds.
 CLOSE_TRAVEL_S = {
-    1: 9,
+    1: 5.5,
     2: 6,
     3: 6.5,
     4: 4,
-    5: 4,
+    5: 5.7,
     6: 6,
 }
 CLOPEN_HOLD_S = {

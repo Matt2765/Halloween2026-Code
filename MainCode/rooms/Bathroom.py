@@ -44,6 +44,8 @@ def run():
                     break
 
             house.Bathroom_state = "ACTIVE"
+
+            m1Digital_Write(30, 1) #blacklight
             
             play_audio("Bathroom", "bathroomMusicPT1.wav", gain=.6)
 
@@ -111,6 +113,8 @@ def run():
             rsm.led("DROPDOWN1", False)
 
             play_audio("Bathroom", "bathroomMusicPT2.wav", gain=.8)
+
+            m1Digital_Write(30, 0) #blacklight
 
             log_event("waiting...")
 

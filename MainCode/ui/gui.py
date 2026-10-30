@@ -164,12 +164,17 @@ def MainGUI():
     servo_ids = ["DROPDOWN1", "SERVO1", "SERVO2"]  # edit as needed
     servo_labels = {}
     for i, sid in enumerate(servo_ids):
-        row, column = (1, 0) if sid == "DROPDOWN1" else (2, (i-1)*2)
+        row, column = (1, 0) if sid == "DROPDOWN1" else (3, (i-1)*2)
         tk.Label(right, text=sid, font=small, bg="orange").grid(row=row, column=column, sticky="w", padx=(0, 6))
         lbl = tk.Label(right, text="--°", font=small, bg="orange")
         lbl.grid(row=row, column=column+1, columnspan=3 if sid == "DROPDOWN1" else 1,
                  sticky="w", padx=(0, 12))
         servo_labels[sid] = lbl
+
+    tk.Label(right, text="Dropdown sensor", font=small, bg="orange").grid(
+        row=2, column=0, sticky="w", padx=(0, 6))
+    dropdown_button_label = tk.Label(right, text="unknown", font=small, bg="orange")
+    dropdown_button_label.grid(row=2, column=1, columnspan=3, sticky="w", padx=(0, 12))
 
     lantern_frame = tk.Frame(panel, bg="orange")
     lantern_frame.grid(row=2, column=0, sticky="nw", pady=(4, 0))
@@ -189,8 +194,18 @@ def MainGUI():
 
     # ===== Live updater (every 100 ms, reads only; no serial waits) =====
     def _update_status():
+        pressed = rsm.get_button_value("DROPDOWN1")
+        dropdown_status = rsm.device_status("DROPDOWN1")
+        if not dropdown_status.get("available"):
+            pressed = None
+        dropdown_age = dropdown_status.get("age_ms")
+        heard = "--" if dropdown_age is None else f"{dropdown_age / 1000:.1f}s"
+        button_text = ("True (pressed)" if pressed is True else
+                       "False (released)" if pressed is False else
+                       f"unknown ({dropdown_status['state']})")
+        dropdown_button_label.config(text=f"{button_text} / {heard}")
         pedro = pedro_status()
-        pedro_text = "running" if pedro["running"] and pedro["connected"] else "waiting for link" if pedro["running"] else "stopped"
+        pedro_text = "running" if pedro["running"] and pedro["connected"] else "waiting for link" if pedro["running"] else "idle animations" if pedro.get("mode") == "idle" else "stopped"
         pedro_label.config(text=f"Pedro {pedro_text} | {pedro['channel']}" +
                            (f" | {pedro['error']}" if pedro["error"] else ""))
         for sid, lbl in tof_labels.items():

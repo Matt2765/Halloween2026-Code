@@ -24,7 +24,7 @@ RELAYS = [
     ("bath_strobe", "Bathroom", "Strobe", 35, 0),
     ("bath_mirror", "Bathroom", "Mirror light", 33, 0),
     ("bath_magic", "Bathroom", "Magic light", 31, 0),
-    ("shower_ambient", "Shower Hallway", "Ambient light", 30, 0),
+    ("shower_ambient", "Shower Hallway", "Blacklight", 30, 0),
     ("shower_strobe", "Shower Hallway", "Strobe", 32, 0),
     ("shower_light", "Shower Hallway", "Shower light", 34, 0),
     ("shower_lanterns", "Shower Hallway", "Lanterns", 36, 0),
@@ -42,7 +42,9 @@ RELAYS = [
     ("forest_smoke", "Forest Hallway", "Smoke machine 6", 57, 0),
     ("forest_strobe", "Forest Hallway", "Strobe", 8, 0),
     ("forest_prop_drop", "Forest Hallway", "Prop drop", 42, 0),
+    ("forest_lasers", "Forest Hallway", "Lasers", 56, 0),
 ]
+MOSFETS = []  # No wireless MOSFET outputs currently assigned in the wiring plan.
 DIMMERS = [
     (1, "Cabin Room", "Ambient light 1"), (2, "Cabin Room", "Grandma light"),
     (3, "Basement", "Wall crack lights"), (4, "Dynamic Hallway", "Ambient light 3"),
@@ -53,7 +55,6 @@ UNASSIGNED_CONTROLS = [
     ("Bathroom", "Mirror servo", "Servo device ID needs to be assigned"),
     ("Dynamic Hallway", "Blacklights", "Cable I, red; Arduino pin needed"),
     ("Dynamic Hallway", "Smoke machine 2", "Cable J, red/black; Arduino pin needed"),
-    ("Forest Hallway", "Lasers", "ESP32 MOSFET; device ID and command mapping needed"),
     ("Graveyard", "Wendigo", "Device/pin and command mapping needed"),
 ]
 UNMAPPED = [f"{room}: {label} - {detail}" for room, label, detail in UNASSIGNED_CONTROLS]
@@ -77,6 +78,7 @@ def catalog():
             for output, limit in character.controller_factory.output_limits.items()])
             for key, character in characters.items()],
         relays=[dict(id=k, room=r, label=l, pin=p) for k, r, l, p, _ in RELAYS],
+        mosfets=[dict(id=k, room=r, label=l, node=n, pin=p) for k, r, l, n, p in MOSFETS],
         dimmers=[dict(id=c, room=r, label=l) for c, r, l in DIMMERS],
         doors=[dict(id=i, sensor=DOOR_SENSOR_IDS[i], room=DOOR_ROOMS.get(i, "Doors"))
                for i in DOOR_SOLENOID_PINS],
@@ -119,6 +121,14 @@ def execute(request):
             if not arduino.M1_available:
                 raise RuntimeError("Arduino unavailable; no physical output was changed")
             arduino.M1.digital_write(entry[3], entry[4] if value else 1 - entry[4])
+        elif kind == "mosfet":
+            entry = next((row for row in MOSFETS if row[0] == key), None)
+            if entry is None or type(value) is not bool:
+                raise ValueError("Unknown MOSFET output or invalid ON/OFF value")
+            if rsm.healthy()["disabled"]:
+                raise RuntimeError("Sensor monitor disabled; command was not sent")
+            cid = rsm.mosfet([entry[3]], entry[4], value)[entry[3]]
+            result = _delivery(rsm, cid)
         elif kind == "dimmer":
             if type(key) is not int or key not in [row[0] for row in DIMMERS]:
                 raise ValueError("Unknown dimmer channel")
@@ -174,15 +184,22 @@ def execute(request):
             if key not in ("pedro", "george"):
                 raise ValueError("Unknown animatronic")
             character = anim.pedro if key == "pedro" else anim.george
-            if value not in ("start", "stop", "talk", "pose"):
+            if value not in ("start", "stop", "talk", "pose", "idle_start", "idle_stop"):
                 raise ValueError("Unknown animatronic action")
-            if value == "stop":
-                character.stop()
-                result["message"] = f"{character.name} stop/park requested"
+            if value in ("stop", "idle_stop"):
+                if value == "stop":
+                    character.stop()
+                    result["message"] = f"{character.name} stop/park requested"
+                else:
+                    character.stop_idle()
+                    result["message"] = f"{character.name} idle movement stopped; current speech continues"
             else:
                 if rsm.healthy()["disabled"]:
                     raise RuntimeError("Sensor monitor disabled; command was not sent")
-                if value == "pose":
+                if value == "idle_start":
+                    accepted = character.start_idle()
+                    result["message"] = f"{character.name} idle movement enabled"
+                elif value == "pose":
                     outputs = request.get("outputs")
                     limits = character.controller_factory.output_limits
                     if not isinstance(outputs, dict) or not outputs or any(output not in limits for output in outputs):

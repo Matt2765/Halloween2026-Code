@@ -138,14 +138,49 @@ _stop_event = threading.Event()
 
 
 class PlaybackHandle:
-    """Completion, fade-out, and scoped cancellation for one file playback."""
+    """Completion, cancellation, fade-out, and optional DAC-timed voice levels."""
     def __init__(self, epoch: int, label: str):
         self.epoch = epoch
         self.label = label
         self.created_at = time.monotonic()
         self.done = threading.Event()
         self.cancelled = False
+        self.track_envelope = False
+        self._audio_envelope: tuple[tuple[float, float], ...] = ()
+        self._audible_until = 0.0
         self._fade_seconds: float | None = None
+
+    def audio_level(self, now: float | None = None) -> float:
+        """RMS of this voice at the DAC clock, zero before start/during silence.
+
+        Only populated for track_envelope=True playback. Immutable snapshots
+        let the radio worker read without locking the audio callback.
+        """
+        if self.cancelled:
+            return 0.0
+        now = time.monotonic() if now is None else now
+        for when, level in reversed(self._audio_envelope):
+            if when <= now:
+                return level if now - when <= 0.15 else 0.0
+        return 0.0
+
+    def audible_pending(self) -> bool:
+        """The mixer may have finished decoding while its last block awaits DAC."""
+        return not self.cancelled and time.monotonic() < self._audible_until
+
+    def _publish_audio(self, block: FloatArray, samplerate: int, when: float, finished: bool) -> None:
+        if not self.track_envelope:
+            return
+        window = max(1, round(samplerate * 0.01))
+        points = []
+        for at in range(0, len(block), window):
+            chunk = block[at:at + window]
+            level = float(np.sqrt(np.mean(np.square(chunk))))
+            points.append((when + at / samplerate, level))
+        self._audible_until = max(self._audible_until, when + len(block) / samplerate)
+        if finished:
+            points.append((self._audible_until, 0.0))
+        self._audio_envelope = (self._audio_envelope + tuple(points))[-128:]
 
     def fade_out(self, seconds: float = 2.0) -> None:
         """Fade this playback to silence, then stop it. Returns immediately.
@@ -530,6 +565,13 @@ class DeviceMixer:
                 if voice.fade_samples >= voice.fade_length:
                     finished = True
                     voice.session.cancelled = True
+            if voice.session.track_envelope:
+                now = time.monotonic()
+                if time_info is not None:
+                    lead = max(0.0, float(time_info.outputBufferDacTime - time_info.currentTime))
+                else:
+                    lead = float(getattr(self.stream, "latency", 0.0))
+                voice.session._publish_audio(block * abs(voice.gain), self.samplerate, now + lead, finished)
             self._route(output, block, voice)
             if finished:
                 done.append(voice)
@@ -852,10 +894,12 @@ def _submit(
     threaded: bool,
     force_cached: bool = False,
     deduplicate: bool = True,
+    track_envelope: bool = False,
 ) -> PlaybackHandle:
     if house.DISABLE_AUDIO_MANAGER:
         return _disabled_playback()
     session = _Session(_next_epoch(), f"{path.name}@{name or 'all'}")
+    session.track_envelope = track_envelope
     if mode == "all":
         kind: DeviceKind = "primary"
     else:
@@ -920,6 +964,7 @@ def play_to_named_channel(
     honor_breakcheck: bool = True,
     threaded: bool = True,
     deduplicate: bool = True,
+    track_envelope: bool = False,
 ) -> PlaybackHandle:
     """Play a WAV on one configured mono or stereo named route."""
     if house.DISABLE_AUDIO_MANAGER:
@@ -933,7 +978,7 @@ def play_to_named_channel(
         f"looping={looping}, threaded={threaded}"
     )
     return _submit(path, target_name, "one", 0, gain, looping, honor_shutdown, honor_breakcheck, threaded,
-                   deduplicate=deduplicate)
+                   deduplicate=deduplicate, track_envelope=track_envelope)
 
 
 def _speak(text: str, name: str | None, gain: float, rate: int) -> None:
@@ -978,6 +1023,7 @@ def play_to_all_channels(
     honor_breakcheck: bool = True,
     threaded: bool = True,
     deduplicate: bool = True,
+    track_envelope: bool = False,
 ) -> PlaybackHandle | None:
     """Play a WAV, or speak text, on every channel of the primary output."""
     if house.DISABLE_AUDIO_MANAGER:
@@ -989,7 +1035,7 @@ def play_to_all_channels(
         if not path.exists():
             raise FileNotFoundError(path)
         return _submit(path, None, "all", 0, gain, looping, honor_shutdown, honor_breakcheck, threaded,
-                       deduplicate=deduplicate)
+                       deduplicate=deduplicate, track_envelope=track_envelope)
 
     _speak(wav_or_text, None, gain, tts_rate)
 
@@ -1005,6 +1051,7 @@ def play_audio(
     threaded: bool = True,
     honor_breakcheck: bool = True,
     deduplicate: bool = True,
+    track_envelope: bool = False,
 ) -> PlaybackHandle | None:
     """Convenience API for room audio and text-to-speech.
 
@@ -1028,6 +1075,7 @@ def play_audio(
                 threaded=threaded,
                 honor_breakcheck=honor_breakcheck,
                 deduplicate=deduplicate,
+                track_envelope=track_envelope,
             )
         return play_to_named_channel(
             maybe_file,
@@ -1038,6 +1086,7 @@ def play_audio(
             threaded=threaded,
             honor_breakcheck=honor_breakcheck,
             deduplicate=deduplicate,
+            track_envelope=track_envelope,
         )
 
     if ":" in target_or_text:

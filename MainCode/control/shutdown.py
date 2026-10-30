@@ -40,7 +40,7 @@ def shutdown():
 
     # ---------------- Shower Hallway ----------------
     log_event("SHUTDOWN - Shower Hallway:")
-    m1Digital_Write(30, 1); log_event("+120v Ambient Light 7 (M) OFF")
+    m1Digital_Write(30, 1); log_event("+120v Blacklight (M) OFF")
     m1Digital_Write(32, 1); log_event("+120v Strobe 4 (M) OFF")
     m1Digital_Write(34, 1); log_event("+120v Shower Light (M) OFF")
     m1Digital_Write(36, 1); log_event("+120v Lanterns (M) OFF")
@@ -76,7 +76,7 @@ def shutdown():
     m1Digital_Write(57, 1); log_event("Smoke Machine 6 (P) OFF")
     m1Digital_Write(8, 1); log_event("+120v Strobe (P) OFF")
     m1Digital_Write(42, 1); log_event("+12v Prop Drop (P) OFF")
-    # Lasers use an ESP32 MOSFET; no shutdown control is mapped here yet.
+    m1Digital_Write(56, 1); log_event("+5v Lasers (Q) OFF")
 
     # ---------------- Graveyard ----------------
     log_event("SHUTDOWN - Graveyard:")

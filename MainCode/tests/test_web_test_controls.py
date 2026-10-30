@@ -23,6 +23,7 @@ class WebTestControlsTests(unittest.TestCase):
         self.arduino = SimpleNamespace(M1_available=True, M1=SimpleNamespace(digital_write=Mock()))
         self.dim = SimpleNamespace(_simulated=False, dim=Mock(return_value=True))
         self.rsm = SimpleNamespace(healthy=lambda: {'disabled': False},
+            mosfet=Mock(return_value={'MOSFET1':'cid'}),
             servo=Mock(return_value='cid'), led=Mock(return_value='cid'),
             command_status=Mock(return_value={'status': 'queued'}),
             LANTERN_STATES=('off','solid_on'),
@@ -39,6 +40,7 @@ class WebTestControlsTests(unittest.TestCase):
             self.characters[key] = SimpleNamespace(name=key.capitalize(),
                 controller_factory=SimpleNamespace(output_limits=limits,rest_pose=rest),
                 start=Mock(return_value=True), talk=Mock(return_value=True), stop=Mock(),
+                start_idle=Mock(return_value=True), stop_idle=Mock(),
                 pose=Mock(return_value=True), status=Mock(return_value=dict(mode='off',error=None)))
         control.animatronic_service = SimpleNamespace(**self.characters)
         self.audio = SimpleNamespace(list_named_channels=lambda: ['Pedro','George','Basement'])
@@ -70,6 +72,34 @@ class WebTestControlsTests(unittest.TestCase):
         test_outputs = {pin: 1 - on for key, room, label, pin, on in self.scope['RELAYS']
                         if key != 'house_light'}
         self.assertEqual(test_outputs, shutdown_outputs)
+
+    def test_forest_lasers_use_the_assigned_wired_pin(self):
+        for value in (True, False):
+            self.execute('relay', 'forest_lasers', value)
+            self.arduino.M1.digital_write.assert_called_with(56, 0 if value else 1)
+        self.rsm.mosfet.assert_not_called()
+        for key, value in [('arbitrary', True), ('forest_lasers', 1)]:
+            with self.assertRaises(ValueError):
+                self.execute('relay', key, value)
+        with self.assertRaises(ValueError):
+            self.execute('mosfet', 'forest_lasers', True)
+        self.rsm.mosfet.assert_not_called()
+
+    def test_shutdown_turns_lasers_off_without_wireless_monitor(self):
+        path = Path(__file__).resolve().parents[1] / 'control/shutdown.py'
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'))
+        tree.body = [n for n in tree.body if getattr(n, 'name', None) == 'shutdown']
+        lights = Mock()
+        scope = dict(house=SimpleNamespace(), rsm=self.rsm, log_event=Mock(),
+                     DOOR_SOLENOID_PINS={}, apply_door_shutdown_state=Mock(),
+                     stop_all=Mock(), dim=Mock(), m1Digital_Write=Mock(),
+                     t=SimpleNamespace(sleep=Mock()), toggleHouseLights=lights)
+        exec(compile(tree, str(path), 'exec'), scope)
+        self.rsm.mosfet.side_effect = RuntimeError('Call init() first')
+        scope['shutdown']()
+        scope['m1Digital_Write'].assert_any_call(56, 1)
+        self.rsm.mosfet.assert_not_called()
+        lights.assert_called_with(True)
 
     def test_numeric_validation_and_dimmer_channel(self):
         self.execute('dimmer',6,37.5)
@@ -147,6 +177,16 @@ class WebTestControlsTests(unittest.TestCase):
             character=self.characters[key]
             character.pose.assert_called_once_with(ramp_ms=500,**outputs)
             character.start.assert_not_called()
+            character.talk.assert_not_called()
+
+    def test_idle_buttons_work_without_audio_and_do_not_stop_speech(self):
+        self.scope['house'].DISABLE_AUDIO_MANAGER=True
+        for key, character in self.characters.items():
+            self.execute('animatronic',key,'idle_start')
+            character.start_idle.assert_called_once_with()
+            self.execute('animatronic',key,'idle_stop')
+            character.stop_idle.assert_called_once_with()
+            character.stop.assert_not_called()
             character.talk.assert_not_called()
 
     def test_invalid_animatronic_requests_never_reach_service(self):

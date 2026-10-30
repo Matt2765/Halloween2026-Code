@@ -12,12 +12,17 @@ bool Radio::begin(const char* id,Handler handler,Result result) {
   if(!saved) return false;
   urgent_=xQueueCreate(32,sizeof(Received)); telemetry_=xQueueCreate(16,sizeof(Received));
   if(!urgent_||!telemetry_) return false;
+  if(extender_) {
+    forwardUrgent_=xQueueCreate(16,sizeof(Received));
+    forwardTelemetry_=xQueueCreate(16,sizeof(Received));
+    if(!forwardUrgent_||!forwardTelemetry_) return false;
+  }
   WiFi.persistent(false); WiFi.mode(WIFI_STA);
   // ESP-NOW is the live control link. Modem sleep can otherwise add periodic
   // latency while an unassociated station wakes for radio traffic.
   if(esp_wifi_set_ps(WIFI_PS_NONE)!=ESP_OK||
      esp_wifi_set_channel(CHANNEL,WIFI_SECOND_CHAN_NONE)!=ESP_OK||
-     esp_now_init()!=ESP_OK) return false;
+     esp_now_init()!=ESP_OK || esp_wifi_get_mac(WIFI_IF_STA,localMac_)!=ESP_OK) return false;
   esp_now_peer_info_t peer{}; memcpy(peer.peer_addr,BROADCAST_MAC,6); peer.channel=CHANNEL; peer.ifidx=WIFI_IF_STA;
   if(esp_now_add_peer(&peer)!=ESP_OK) return false;
   active_=this; return esp_now_register_recv_cb(callback)==ESP_OK;
@@ -25,11 +30,27 @@ bool Radio::begin(const char* id,Handler handler,Result result) {
 void Radio::receive(const uint8_t* mac,const uint8_t* data,int n) {
   auto* a=active_; if(!a) return;
   Received r{};
-  if(n<0||!decode(data,size_t(n),r.packet)) { __atomic_fetch_add(&a->callbackMalformed_,1,__ATOMIC_RELAXED); return; }
-  if(strcmp(r.packet.dst,a->id_) && strcmp(r.packet.dst,"*")) return;
+  if(n<0) return;
+  uint32_t now=millis();
+  if(extenderFrame(data,size_t(n))) {
+    ExtendedPacket frame;
+    if(!decodeExtended(data,size_t(n),frame)) { __atomic_fetch_add(&a->callbackMalformed_,1,__ATOMIC_RELAXED); return; }
+    if((!memcmp(frame.floodMac,a->localMac_,6) && frame.floodSession==a->session) ||
+       a->extenderSeen_.duplicate(frame,now)) return;
+    r.packet=frame.packet; memcpy(r.mac,frame.originMac,6); r.rxMs=now-frame.ageMs;
+    r.hops=frame.hops; memcpy(r.floodMac,frame.floodMac,6);
+    r.floodSession=frame.floodSession; r.floodSequence=frame.floodSequence;
+  } else {
+    if(!decode(data,size_t(n),r.packet)) { __atomic_fetch_add(&a->callbackMalformed_,1,__ATOMIC_RELAXED); return; }
+    memcpy(r.mac,mac,6); r.rxMs=now;
+  }
   // Commands only originate at the bridge; general broadcasts cannot actuate.
   if(r.packet.type==COMMAND && strcmp(r.packet.src,BRIDGE_ID)) return;
-  memcpy(r.mac,mac,6); r.rxMs=millis();
+  if(a->extender_ && r.hops<EXTENDER_HOPS && strcmp(r.packet.src,a->id_) && strcmp(r.packet.dst,a->id_)) {
+    auto forwardQueue=(r.packet.flags||r.packet.type==ACK)?a->forwardUrgent_:a->forwardTelemetry_;
+    if(xQueueSend(forwardQueue,&r,0)!=pdTRUE) __atomic_fetch_add(&a->callbackDrops_,1,__ATOMIC_RELAXED);
+  }
+  if(strcmp(r.packet.dst,a->id_) && strcmp(r.packet.dst,"*")) return;
   auto q=(r.packet.flags||r.packet.type==ACK) ? a->urgent_ : a->telemetry_;
   // ESP-NOW callbacks run in the Wi-Fi task, NOT an ISR.
   if(xQueueSend(q,&r,0)!=pdTRUE) __atomic_fetch_add(&a->callbackDrops_,1,__ATOMIC_RELAXED);
@@ -40,6 +61,24 @@ Packet Radio::make(Type type,const char* destination,uint8_t length,bool reliabl
   Packet p; p.type=type; p.length=length; p.flags=reliable?ACK_REQUIRED:0;
   strcpy(p.src,id_); if(validId(destination,true)) strcpy(p.dst,destination);
   p.session=session; p.seq=++sequence; return p;
+}
+void Radio::forward(const Received& r) {
+  uint32_t age=millis()-r.rxMs;
+  if(age>DELIVERY_LIFETIME_MS || r.hops>=EXTENDER_HOPS) { forwardFailures++; return; }
+  ExtendedPacket frame; frame.packet=r.packet; memcpy(frame.originMac,r.mac,6);
+  frame.hops=r.hops+1; frame.ageMs=uint16_t(age);
+  if(r.hops) {
+    memcpy(frame.floodMac,r.floodMac,6);
+    frame.floodSession=r.floodSession; frame.floodSequence=r.floodSequence;
+  } else {
+    memcpy(frame.floodMac,localMac_,6); frame.floodSession=session;
+    if(floodSequence_==0xffffffff) { forwardFailures++; return; }
+    frame.floodSequence=++floodSequence_;
+  }
+  uint8_t bytes[EXTENDER_MAX_BYTES]; size_t n=encodeExtended(frame,bytes);
+  // Forward once per flood. Only the original sender owns application retries.
+  if(n && esp_now_send(BROADCAST_MAC,bytes,n)==ESP_OK) forwardedPackets++;
+  else forwardFailures++;
 }
 bool Radio::transmit(const Packet& p) {
   uint8_t bytes[HEADER+MAX_PAYLOAD]; size_t n=encode(p,bytes);
@@ -57,10 +96,11 @@ bool Radio::send(const Packet& p) {
   stats.drops++; return false;
 }
 bool Radio::busy() const { for(auto& p:pending_) if(p.used) return true; return false; }
-void Radio::cancel(const char* destination,Code why,uint8_t operation) {
+void Radio::cancel(const char* destination,Code why,uint8_t operation,int pin) {
   for(auto& p:pending_) if(p.used&&(!destination||!strcmp(destination,p.packet.dst)) &&
     (!operation || (p.packet.type==COMMAND && (p.packet.payload[4]==operation ||
-      (operation==MOVE && p.packet.payload[4]==SET_DEFAULT))))) {
+      (operation==MOVE && p.packet.payload[4]==SET_DEFAULT)))) &&
+    (pin<0 || (p.packet.type==COMMAND && p.packet.payload[4]==MOSFET_SET && p.packet.payload[11]==pin))) {
     p.used=false; if(result_) result_(p.packet,why,millis()-p.began);
   }
 }
@@ -115,6 +155,10 @@ void Radio::poll() {
   Received r;
   for(int i=0;i<32 && xQueueReceive(urgent_,&r,0)==pdTRUE;i++) process(r);
   for(int i=0;i<8 && xQueueReceive(telemetry_,&r,0)==pdTRUE;i++) process(r);
+  if(extender_) {
+    for(int i=0;i<16 && xQueueReceive(forwardUrgent_,&r,0)==pdTRUE;i++) forward(r);
+    for(int i=0;i<8 && xQueueReceive(forwardTelemetry_,&r,0)==pdTRUE;i++) forward(r);
+  }
   uint32_t now=millis();
   for(auto& p:pending_) if(p.used) {
     const uint32_t lifetime=p.packet.type==TOF ? 100 : DELIVERY_LIFETIME_MS;

@@ -121,9 +121,12 @@ class HTTPServerTests(unittest.TestCase):
             setattr(house, room + "_state", "INACTIVE")
         house.CabinRoom_state = "ACTIVE"
         house.Bathroom_state = "STANDBY"
+        dropdown = {"value": True, "status": {"available": True, "state": "valid", "age_ms": 100}}
         rsm = SimpleNamespace(
-            get_value=lambda *args: None, device_status=lambda *args: {},
-            get_button_value=lambda *args: None, get_pir_state=lambda *args: {},
+            get_value=lambda *args: None,
+            device_status=lambda sid: dropdown["status"] if sid == "DROPDOWN1" else {},
+            get_button_value=lambda sid: dropdown["value"] if sid == "DROPDOWN1" else None,
+            get_pir_state=lambda *args: {},
             get_servo_state=lambda *args: {}, get_lantern_state=lambda *args: {},
             healthy=lambda: {}, command_failure=lambda: None,
         )
@@ -149,10 +152,19 @@ class HTTPServerTests(unittest.TestCase):
             _, body = self.get("/api/status")
             states = {r["id"]: r["state"] for r in json.loads(body)["rooms"]}
             self.assertEqual(states["Bathroom"], "INACTIVE")
+            for value, available in ((True, True), (False, True), (None, True), (False, False)):
+                dropdown["value"] = value
+                dropdown["status"]["available"] = available
+                _, body = self.get("/api/status")
+                reading = json.loads(body)["dropdown_button"]
+                self.assertIs(reading["value"], value if available else None)
+                self.assertEqual(reading["status"]["age_ms"], 100)
         status, page = self.get()
         self.assertEqual(status, 200)
         self.assertIn(b'id="roomStates"', page)
         self.assertIn(b'renderRoomStates(s.rooms||[])', page)
+        self.assertIn(b'id="dropdownButton"', page)
+        self.assertIn(b'renderDropdownButton(s.dropdown_button)', page)
 
     def test_slow_hardware_does_not_block_page_or_emergency(self):
         started, release = threading.Event(), threading.Event()

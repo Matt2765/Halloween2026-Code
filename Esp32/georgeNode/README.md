@@ -35,7 +35,7 @@ animatronic_service.george.mouth(120)
 animatronic_service.george.eyes(True)
 animatronic_service.george.pose(neck=5, mouth=180, eyes=False, ramp_ms=800)
 
-# One random quip, or one chosen recording; parks when finished.
+# One random quip, or one chosen recording; returns to idle if enabled.
 animatronic_service.george.talk()
 animatronic_service.george.talk("Quip01.mp3", channel="George", gain=0.8)
 
@@ -75,10 +75,40 @@ currently map to secondary output index 1. Choose another named route with
 `channel=...` or change George's map in `control/audio_manager.py` for a separate
 speaker. The characters can run independently; sharing a route mixes their audio.
 
+## Persistent idle and speech gain (both characters)
+
+```python
+from control import animatronic_service
+
+character = animatronic_service.pedro  # Or animatronic_service.george
+character.start_idle()                # Body idle only; no audio/quips required.
+character.talk(channel="Basement", gain=0.5)
+character.talk("Quip01.mp3", channel="Basement", gain=0.8)
+# Idle continues after each quip; only speech controls the mouth/beak.
+character.stop_idle()                 # Body stops; any current speech continues.
+character.stop()                      # Stop everything and park.
+```
+
+`idle()` / `idle(True)` alias `start_idle()`; `idle(False)` aliases `stop_idle()`.
+Gain is explicit on each talk call: None uses the configured route gain, 0 is
+silent, 0.5 scales to half amplitude, 1 uses unity gain, and values above 1 amplify.
+Gain must be finite and nonnegative. Speech remains nonblocking.
+
+Idle and speech share one pose worker, so idle never replaces a talking pose.
+Enabling idle during speech does not restart/cancel the quip. Stopping idle during
+speech parks only non-mouth outputs while mouth timing/audio finish normally.
+After `stop_idle()`, body animation remains disabled until `start_idle()` is called.
+If persistent idle is disabled, a completed quip parks. Direct manual output calls
+still take over from the show and stop its audio/idle. System shutdown stops both
+idle and speech. Status includes `idle_enabled` and mode `idle` when idle-only.
+These changes are Python-only; restart MainCode and refresh the web page, with
+no ESP firmware update required.
+
 ## Web tests
 
 On the remote web page, open **Test > Animatronics** for Pedro and George.
-Each character has speaker route/gain, Start talking, Play one quip, Stop & park,
+Each character has speaker route/gain, Start talking, Play one quip, Start idle,
+Stop idle, Stop & park,
 live connection/mode/error status, and individual calibrated output controls.
 Manual output tests stop that character's talking show and hold the pose.
 Stop before changing an already-running show's voice settings. George has mouth

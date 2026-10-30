@@ -114,7 +114,7 @@ def _store_device(shared, obj, now):
     session, seq = obj.get("session"), obj.get("seq")
     if not _valid_id(sid) or not _uint32(session) or not _uint32(seq) or not isinstance(vals, dict):
         raise ValueError("Invalid device identity or payload")
-    if kind not in ("tof", "button", "pir", "servo", "sprite", "lantern", "pedro", "dropdown", "george"):
+    if kind not in ("tof", "button", "pir", "servo", "sprite", "lantern", "pedro", "dropdown", "george", "mosfet"):
         raise ValueError("Unsupported device kind")
     if kind == "button" and (type(vals.get("btn")) is not int or not 1 <= vals["btn"] <= 8 or type(vals.get("pressed")) is not bool):
         raise ValueError("Invalid button state")
@@ -145,6 +145,13 @@ def _store_device(shared, obj, now):
                              any(type(vals.get(key)) is not int or not 0 <= vals[key] <= 180
                                  for key in ("mouth_angle", "mouth_target", "neck_angle", "neck_target"))):
         raise ValueError("Invalid George state")
+    if kind == "mosfet":
+        pins, on_pins = vals.get("available_pins"), vals.get("on_pins")
+        if (not isinstance(pins, list) or not pins or not isinstance(on_pins, list) or
+                any(type(pin) is not int or not 0 <= pin < 40 for pin in pins + on_pins) or
+                len(set(pins)) != len(pins) or len(set(on_pins)) != len(on_pins) or
+                not set(on_pins).issubset(pins)):
+            raise ValueError("Invalid MOSFET pin state")
     rec = shared.get(sid)
     mac = obj.get("mac")
     if not isinstance(mac, str) or not re.fullmatch(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}", mac):
@@ -543,10 +550,10 @@ def command_failure():
     recovered = {}
     for rec in records:
         if rec["status"] == "accepted":
-            key = (rec["id"], rec.get("op"))
+            key = (rec["id"], rec.get("op"), rec.get("pin"))
             recovered[key] = max(recovered.get(key, -1), rec["created_ms"])
     failures = [rec for rec in records if rec["status"] in ("rejected", "unconfirmed") and
-                recovered.get((rec["id"], rec.get("op")), -1) <= rec["created_ms"]]
+                recovered.get((rec["id"], rec.get("op"), rec.get("pin")), -1) <= rec["created_ms"]]
     if not failures:
         return None
     latest = max(failures, key=lambda rec: rec["t_host_ms"])
@@ -560,7 +567,11 @@ def tx_to_id(device_id, payload):
     payload = json.loads(payload) if isinstance(payload, str) else dict(payload)
     if any(payload.get(key, device_id) != device_id for key in ("id", "to")):
         raise ValueError("Conflicting logical destination")
-    if payload.get("cmd") == "led":
+    if payload.get("cmd") == "mosfet":
+        if type(payload.get("pin")) is not int or not 0 <= payload["pin"] < 40 or type(payload.get("on")) is not bool:
+            raise ValueError("MOSFET requires a GPIO integer in 0..39 and True/False")
+        op, value, duration = "mosfet", int(payload["on"]), 0
+    elif payload.get("cmd") == "led":
         if type(payload.get("on")) is not bool:
             raise ValueError("LED on must be True or False")
         op, value, duration = "led", int(payload["on"]), 0
@@ -595,7 +606,7 @@ def tx_to_id(device_id, payload):
     elif payload.get("cmd", "play") == "play":
         op, value, duration = "play", payload.get("index", payload.get("file")), 0
     else:
-        raise ValueError("Supported commands: angle, set_default, led, pedro, george, lantern, play/index/file, next")
+        raise ValueError("Supported commands: angle, set_default, led, mosfet, pedro, george, lantern, play/index/file, next")
     maximum = 2 if op in ("pedro", "george") else 180 if op in ("move", "set_default") else len(LANTERN_STATES) - 1 if op == "lantern" else 200
     duration_maximum = 0xfffffffe if op == "lantern" else 30000
     if type(value) is not int or not 0 <= value <= maximum or type(duration) is not int or not 0 <= duration <= duration_maximum:
@@ -618,6 +629,8 @@ def tx_to_id(device_id, payload):
                "bridge_connected": bool(connection.get("connected")), "device_state": status["state"],
                "device_age_ms": status["age_ms"], "device_session": device.get("session") if device else None,
                "device_diagnostics": device.get("diagnostics", {}) if device else {}}
+        if op == "mosfet":
+            rec["pin"] = payload["pin"]
         if not connection.get("connected") or not device or not status["available"]:
             detail = ("bridge_disconnected" if not connection.get("connected") else
                       "device_not_seen" if not device else
@@ -626,6 +639,14 @@ def tx_to_id(device_id, payload):
             return cid
         request = {"v": 1, "type": "command", "host": connection["host"], "command_id": cid,
                    "id": device_id, "target_session": device["session"], "op": op, "value": value, "duration_ms": duration}
+        if op == "mosfet":
+            if device["kind"] != "mosfet":
+                _commands[cid] = dict(rec, status="rejected", reason="not_a_mosfet")
+                return cid
+            if payload["pin"] not in device["vals"]["available_pins"]:
+                _commands[cid] = dict(rec, status="rejected", reason="pin_not_configured")
+                return cid
+            request["pin"] = payload["pin"]
         if op == "led" and device["kind"] not in ("dropdown", "button"):
             _commands[cid] = dict(rec, status="rejected", reason="not_an_led_device")
             return cid
@@ -666,6 +687,25 @@ def tx_to_mac(mac, payload):
 
 def servo(device_id, angle, ramp_ms=None):
     return tx_to_id(device_id, {"angle": max(0, min(180, int(angle))), "ramp_ms": 0 if ramp_ms is None else int(ramp_ms)})
+
+
+def mosfet(node_ids, pin, on):
+    """Set one configured GPIO on one or more nodes; return {node_id: command_id}.
+
+    Example: mosfet(["MOSFET1"], 13, True). Outputs latch until changed or node
+    reset; no keepalive is required. Check command_status() for each delivery.
+    """
+    targets = [node_ids] if isinstance(node_ids, str) else list(node_ids)
+    if not targets or any(not _valid_id(sid) for sid in targets):
+        raise ValueError("Provide one or more valid MOSFET node IDs")
+    if type(pin) is not int or not 0 <= pin < 40 or type(on) is not bool:
+        raise ValueError("MOSFET requires a GPIO integer in 0..39 and True/False")
+    return {sid: tx_to_id(sid, {"cmd": "mosfet", "pin": pin, "on": on}) for sid in dict.fromkeys(targets)}
+
+
+def get_mosfet_state(device_id):
+    rec = get(device_id)
+    return dict(device_status(device_id), **(rec["vals"] if rec and rec["kind"] == "mosfet" else {}))
 
 
 def led(device_id, on):

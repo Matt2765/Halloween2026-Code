@@ -121,8 +121,8 @@ def run():
             if basementMusic is not None:
                 basementMusic.fade_out(seconds=5)
 
-            play_audio("Basement", "basementExamplev3.wav", gain=1)
-            play_audio("primary_LFE", "basementExamplev3.wav", gain=1)
+            play_audio("Basement", "basementExamplev4.wav", gain=1)
+            play_audio("primary_LFE", "basementExamplev4.wav", gain=1)
 
             spotThread = True
             spotState = "FLICKERING"
@@ -355,5 +355,20 @@ def awakenGeorge():
     if any(worker.is_alive() for worker in workers):
         log_event("[Basement] George awakening movement has not stopped; skipping dialogue")
         return
-    if not BreakCheck():
-        animatronic_service.george.talk(channel="Basement")
+    if BreakCheck():
+        return
+    george = animatronic_service.george
+    try:
+        if not george.start_idle():
+            return
+        if not george.talk(channel="Basement"):
+            return
+        # talk() is nonblocking: start the extra idle time after playback ends.
+        while george.status()["running"]:
+            if BreakCheck():
+                return
+            t.sleep(.05)
+        if not BreakCheck():
+            wait(15)
+    finally:
+        george.stop()

@@ -67,6 +67,10 @@ class Motion:
 
 class PedroController(AnimatronicController):
     name, kind = "Pedro", "pedro"
+    audio_driven_mouth = True
+    # Full beak strokes; leave enough time at each endpoint for servo travel.
+    speech_min_open, speech_max_open, speech_min_closed = 0.08, 0.18, 0.09
+    speech_open_ratio, speech_close_ratio = 0.24, 0.16
     motion_factory = Motion
     output_limits = dict(wings=(5, 115), beak=(10, 55), neck=bool, eyes=bool)
     rest_pose = dict(wings=WINGS_REST, beak=BEAK_CLOSED, neck=False, eyes=False)

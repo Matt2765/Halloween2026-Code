@@ -1,8 +1,10 @@
 """Shared main-system animatronic API; reuses the existing RSM and mixers.
 
 pedro.start() / george.start(): generic quips, mouth motion, idle movement.
+start_idle() keeps body animation running across talk(..., gain=...) calls.
 george.neck(90): switch to manual control and hold that servo angle.
 """
+import math
 import threading
 from pathlib import Path
 
@@ -21,6 +23,7 @@ class Animatronic:
         self._show = self._controller = None
         self._error = None
         self._mode = "off"
+        self._idle_enabled = False
 
     def _online(self):
         if house.systemState != "ONLINE":
@@ -32,6 +35,15 @@ class Animatronic:
         if self._controller is None:
             self._controller = self.controller_factory(off=True)
         return self._controller
+
+    def _finish_state(self):
+        # Show workers must not acquire the service lock: stop() joins them.
+        return "standby" if self._idle_enabled and house.systemState == "ONLINE" else "off"
+
+    @staticmethod
+    def _validate_gain(gain):
+        if gain is not None and (type(gain) not in (int, float) or not math.isfinite(gain) or gain < 0):
+            raise ValueError("gain must be a finite nonnegative number or None")
 
     def start(self, channel=None, *, gain=None, quips=None, background=None,
               background_channel=None, background_gain=0.89, interval=(10, 15), once=False):
@@ -46,6 +58,7 @@ class Animatronic:
             if self._show and self._show.running:
                 return True
             try:
+                self._validate_gain(gain)
                 if self._show and self._show.thread and self._show.thread.is_alive():
                     raise RuntimeError(f"{self.name} is still stopping")
                 if len(interval) != 2 or interval[0] < 0 or interval[1] < interval[0]:
@@ -54,7 +67,7 @@ class Animatronic:
                     quips=self.quips if quips is None else quips, background=background,
                     background_channel=background_channel, background_gain=background_gain,
                     interval=interval, once=once, enabled=lambda: house.systemState == "ONLINE",
-                    controller=self._hardware())
+                    controller=self._hardware(), finish_state=self._finish_state)
                 candidate.start()
                 self._show, self._mode, self._error = candidate, "generic", None
                 log_event(f"[{self.name}] Started on {candidate.channel}")
@@ -67,23 +80,72 @@ class Animatronic:
     def stop(self):
         """Stop audio/motion and park; retain off heartbeats."""
         with self._lock:
+            self._idle_enabled = False
             if self._show:
                 self._show.stop()
             if self._controller:
                 self._controller.set_state("off")
             self._mode = "off"
 
-    def talk(self, quip=None, channel=None, **settings):
-        """Play one quip with automatic motion, then park (nonblocking).
+    def start_idle(self):
+        """Enable persistent idle motion without starting audio or needing quips.
 
-        quip=None chooses randomly; a filename resolves inside this character's
-        Quips directory. An absolute audio path is also accepted.
+        During a quip only the body's idle setting changes; the mouth/audio
+        continue uninterrupted. Available for every animatronic.
         """
         with self._lock:
-            self.stop()
+            if not self._online():
+                return False
+            controller = self._hardware()
+            self._idle_enabled = True
+            controller.set_idle_motion(True)
+            if not (self._show and self._show.running):
+                if self._show and self._show.thread and self._show.thread.is_alive():
+                    self._error = "Show is still stopping"
+                    self._idle_enabled = False
+                    return False
+                controller.set_state("standby")
+                self._mode = "idle"
+            controller.start()
+            self._error = None
+            return True
+
+    def stop_idle(self):
+        """Disable idle movement without cancelling an in-progress quip."""
+        with self._lock:
+            self._idle_enabled = False
+            if self._controller:
+                self._controller.set_idle_motion(False)
+                if not (self._show and self._show.running):
+                    self._controller.set_state("off")
+                    self._mode = "off"
+
+    def idle(self, enabled=True):
+        """Convenience alias: idle() enables; idle(False) disables."""
+        if type(enabled) is not bool:
+            raise ValueError("Idle enabled must be True or False")
+        if enabled:
+            return self.start_idle()
+        self.stop_idle()
+        return True
+
+    def talk(self, quip=None, channel=None, *, gain=None, **settings):
+        """Play one quip, returning to idle if enabled, otherwise parking.
+
+        gain uses play_audio semantics (None = configured route gain; values
+        above 1 amplify). This call is nonblocking. quip=None picks randomly;
+        filenames resolve inside this character's Quips directory.
+        """
+        self._validate_gain(gain)
+        with self._lock:
+            if not self._online():
+                return False
+            if self._show:
+                # Preserve idle ownership while replacing only this character's audio.
+                self._show.stop(park=False)
             if quip is not None:
                 settings["quips"] = self.quips / Path(quip)
-            return self.start(channel, once=True, **settings)
+            return self.start(channel, gain=gain, once=True, **settings)
 
     def pose(self, *, ramp_ms=0, **outputs):
         """Switch to manual mode, holding outputs without random movement.
@@ -133,8 +195,11 @@ class Animatronic:
         # UI polling never waits for a stop/join or asset validation.
         show, controller = self._show, self._controller
         running = bool(show and show.running)
-        return {"running": running, "mode": "generic" if running else
-                "manual" if controller and controller.manual_pose is not None else "off",
+        idle_enabled = self._idle_enabled and house.systemState == "ONLINE"
+        return {"running": running, "idle_enabled": idle_enabled,
+                "mode": "generic" if running else
+                "manual" if controller and controller.manual_pose is not None else
+                "idle" if idle_enabled else "off",
                 "channel": show.channel if show else self.name,
                 "connected": bool(controller and controller.connected.is_set()),
                 "error": self._error or (show.last_error if show else None) or

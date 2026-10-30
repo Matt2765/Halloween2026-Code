@@ -48,12 +48,12 @@ def run():
                     break'''
 
             while house.Bathroom_state != "ACTIVE":
-                if BreakCheck():
+                if BreakCheck() or house.Demo:
                     break
                 t.sleep(.5)
 
             while house.Bathroom_state != "STANDBY":
-                if BreakCheck():
+                if BreakCheck() or house.Demo:
                     break
                 t.sleep(.5)
             
@@ -70,10 +70,7 @@ def run():
 
             wait(3)
 
-            dim(0, channel=4) #dynamic hallway green
-            dim(0, channel=5) #dynamic hallway orange
-
-            for i in range(150): #15 sec
+            for i in range(120): #12 sec
                 if rsm.get_button_value("BTN4"):
                     stopBlastLightning()
                     '''for i in range(10):
@@ -82,8 +79,13 @@ def run():
                         t.sleep(.1)'''
 
                     stopBlastLightning()
+
+                    dim(0, channel=4) #dynamic hallway green
+                    dim(0, channel=5) #dynamic hallway orange
                     
                     m1Digital_Write(23, 1) #dynamic hallway lanterns
+
+                    t.sleep(1)
 
                     m1Digital_Write(7, 0) #strobe
 
@@ -104,6 +106,8 @@ def run():
                 t.sleep(.1)
                 if BreakCheck():
                     break
+
+            rsm.lantern(9, "flickering_on")
 
             if BreakCheck() or house.Demo:
                 if house.Demo:
@@ -161,20 +165,19 @@ def _run_lightning(count, stop_event, done, handles):
             m1Digital_Write(4, 1)
         finally:
             try:
-                if stop_event.is_set() or BreakCheck():
+                if BreakCheck():
                     _stop_lightning_audio(handles)
             finally:
                 done.set()
 
 
 def stopBlastLightning():
-    """Cancel flashes and their thunder, wait for cleanup, and leave lightning OFF."""
+    """Stop flashes/new bolts and leave lightning OFF; current thunder finishes."""
     with _lightning_lock:
         _lightning_stop.set()
         if _lightning_worker is not threading.current_thread():
             if not _lightning_done.wait(timeout=2):
                 raise RuntimeError("Dynamic Hallway lightning has not stopped yet")
-        _stop_lightning_audio(_lightning_audio)
 
 
 def _start_lightning(count, threaded):
@@ -205,7 +208,7 @@ def lightning_bolt(threaded=False):
 def blastLightning(threaded=False):
     """Seven bolts, three seconds apart. Use threaded=True for background playback.
 
-    stopBlastLightning() interrupts flashes, gaps and this effect's own audio.
-    Starting again replaces any previous lightning worker.
+    stopBlastLightning() interrupts flashes and gaps, allowing thunder to finish.
+    Starting again replaces the flash worker without cutting off its current sound.
     """
     return _start_lightning(7, threaded)

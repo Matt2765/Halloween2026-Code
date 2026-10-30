@@ -136,6 +136,16 @@ Code received(const Received& r) {
       vals["eyes"]=bool(b[10]); vals["moving"]=bool(b[11]);
       vals["command_session"]=get32(b+12); vals["command_seq"]=get32(b+16); vals["ready"]=true; break;
     }
+    case MOSFET: {
+      doc["kind"]="mosfet";
+      auto available=vals.createNestedArray("available_pins"), on=vals.createNestedArray("on_pins");
+      uint64_t allowed=get64(b), outputs=get64(b+8);
+      for(int pin=0;pin<40;pin++) {
+        if(allowed&(uint64_t(1)<<pin)) available.add(pin);
+        if(outputs&(uint64_t(1)<<pin)) on.add(pin);
+      }
+      vals["command_session"]=get32(b+16); vals["command_seq"]=get32(b+20); vals["ready"]=true; break;
+    }
     case LANTERN: {
       const char* states[]={"off","solid_on","flickering_on","intense_flickering_on","flicker_out","intense_flicker_out","strobe"};
       doc["kind"]="lantern"; vals["lantern_state"]=states[b[0]];
@@ -185,6 +195,7 @@ void usbLine(const char* line) {
   if(!strcmp(op,"lantern")) operation=LANTERN_STATE;
   if(!strcmp(op,"pedro")) operation=PEDRO_POSE;
   if(!strcmp(op,"george")) operation=GEORGE_POSE;
+  if(!strcmp(op,"mosfet")) operation=MOSFET_SET;
   if(!strcmp(op,"led")) operation=LED;
   if(!operation||!doc["value"].is<uint16_t>()||!doc["duration_ms"].is<uint32_t>()) {
     resultLine(cid,id,"rejected","invalid_command"); return;
@@ -199,6 +210,9 @@ void usbLine(const char* line) {
      !doc["neck"].is<uint16_t>() || doc["neck"].as<uint16_t>()>180 || !doc["eyes"].is<bool>())) {
     resultLine(cid,id,"rejected","invalid_george_pose"); return;
   }
+  if(operation==MOSFET_SET && (value>1 || duration!=0 || !doc["pin"].is<uint8_t>() || doc["pin"].as<uint8_t>()>=40)) {
+    resultLine(cid,id,"rejected","invalid_mosfet_output"); return;
+  }
   if((operation!=LANTERN_STATE && duration>30000) || ((operation==MOVE||operation==SET_DEFAULT)&&value>180) || (operation==PLAY&&value>200) ||
      (operation==LED && (value>1 || duration!=0)) ||
      (operation==LANTERN_STATE && (value>LANTERN_STATE_MAX || duration<1 || duration==0xffffffff || !doc["sync_generation"].is<uint32_t>()))) {
@@ -206,11 +220,13 @@ void usbLine(const char* line) {
   }
   if(operation==MOVE||operation==SET_DEFAULT||operation==PEDRO_POSE||operation==GEORGE_POSE||operation==LED)
     radio.cancel(id,SUPERSEDED,operation==SET_DEFAULT?MOVE:operation);
+  if(operation==MOSFET_SET) radio.cancel(id,SUPERSEDED,MOSFET_SET,doc["pin"].as<int>());
   Request* request=nullptr;
   for(auto& r:requests) if(!r.used) { request=&r; break; }
   if(!request) { resultLine(cid,id,"rejected","queue_full"); return; }
-  auto p=radio.make(COMMAND,id,operation==LANTERN_STATE?15:operation==PEDRO_POSE?17:operation==GEORGE_POSE?16:11,true); put32(p.payload,peer->session); p.payload[4]=operation;
+  auto p=radio.make(COMMAND,id,operation==LANTERN_STATE?15:operation==PEDRO_POSE?17:operation==GEORGE_POSE?16:operation==MOSFET_SET?12:11,true); put32(p.payload,peer->session); p.payload[4]=operation;
   put16(p.payload+5,value); put32(p.payload+7,duration);
+  if(operation==MOSFET_SET) p.payload[11]=doc["pin"].as<uint8_t>();
   if(operation==LANTERN_STATE) put32(p.payload+11,doc["sync_generation"].as<uint32_t>());
   if(operation==GEORGE_POSE) {
     put16(p.payload+11,doc["mouth"].as<uint16_t>()); put16(p.payload+13,doc["neck"].as<uint16_t>());

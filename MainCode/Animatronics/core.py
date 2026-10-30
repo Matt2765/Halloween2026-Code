@@ -33,6 +33,11 @@ class AnimatronicController:
         self.state = "off" if off else "standby"
         self.thread = None
         self.manual_pose = None
+        self.idle_motion = True
+        self._speech_handle = None
+        self._speech_peak = 0.03
+        self._mouth_opening = 0.0
+        self._mouth_changed_at = float("-inf")
         self.last_error = None
         self.link_epoch = 0
 
@@ -49,6 +54,45 @@ class AnimatronicController:
         with self.lock:
             self.state = state
             self.manual_pose = None
+            if state != "active":
+                self._speech_handle = None
+                self._mouth_opening = 0.0
+
+    def set_speech_handle(self, handle):
+        with self.lock:
+            self._speech_handle = handle
+            self._speech_peak = 0.03
+            self._mouth_opening = 0.0
+            self._mouth_changed_at = float("-inf")
+
+    def _audio_mouth(self, now):
+        level = self._speech_handle.audio_level(now)
+        self._speech_peak = max(level, self._speech_peak * 0.995, 0.02)
+        open_gate = max(0.006, self._speech_peak * self.speech_open_ratio)
+        close_gate = max(0.004, self._speech_peak * self.speech_close_ratio)
+        elapsed = now - self._mouth_changed_at
+        was_open = bool(self._mouth_opening)
+        is_open = was_open
+        if level < 0.004:
+            is_open = False  # Silence/end closes immediately, without a release tail.
+        elif was_open:
+            if elapsed >= self.speech_max_open or (elapsed >= self.speech_min_open and level < close_gate):
+                is_open = False
+        elif elapsed >= self.speech_min_closed and level >= open_gate:
+            is_open = True
+        if is_open != was_open:
+            self._mouth_changed_at = now
+        self._mouth_opening = float(is_open)
+        mouth = "beak" if "beak" in self.rest_pose else "mouth"
+        closed = self.rest_pose[mouth]
+        low, high = self.output_limits[mouth]
+        opened = low if closed == high else high
+        return mouth, opened if is_open else closed
+
+    def set_idle_motion(self, enabled):
+        """Gate non-mouth animation without changing speech state or manual poses."""
+        with self.lock:
+            self.idle_motion = bool(enabled)
 
     def set_outputs(self, **outputs):
         """Hold a complete manual pose; callers validate character-specific limits."""
@@ -64,6 +108,7 @@ class AnimatronicController:
         self.connected.clear()
         with self.lock:
             self.link_epoch += 1
+            self._speech_handle = None
             if self.manual_pose is not None:
                 self.state = "off"
             self.manual_pose = None
@@ -124,7 +169,16 @@ class AnimatronicController:
                         self._reset(motion, now)
                         sent_pose = None
                 with self.lock:
-                    pose = dict(self.manual_pose) if self.manual_pose is not None else motion.pose(self.state, now)
+                    if self.manual_pose is not None:
+                        pose = dict(self.manual_pose)
+                    else:
+                        pose = motion.pose(self.state, now)
+                        if self.state == "active" and self._speech_handle is not None and callable(getattr(self._speech_handle, "audio_level", None)):
+                            mouth, angle = self._audio_mouth(now)
+                            pose[mouth] = angle
+                        if not self.idle_motion:
+                            mouth = "beak" if "beak" in self.rest_pose else "mouth"
+                            pose.update({key: value for key, value in self.rest_pose.items() if key != mouth})
                 if pose != sent_pose or now - last_sent >= HEARTBEAT_SECONDS:
                     if self.simulate:
                         print(f"[{self.name} simulation] {pose}")
@@ -159,29 +213,34 @@ def stop_player(handle):
         handle.stop()
 
 
-def start_player(channel, path, *, background=False, gain=None):
+def start_player(channel, path, *, background=False, gain=None, track_envelope=False):
     from control.audio_manager import play_audio
     # Independent manual control may run while HouseActive is False. System
     # shutdown still cancels these voices through honor_shutdown and the service.
     return play_audio(channel, str(path), gain=gain, looping=background,
-                      threaded=True, honor_breakcheck=False, deduplicate=False)
+                      threaded=True, honor_breakcheck=False, deduplicate=False, track_envelope=track_envelope)
 
 
 def play_quip(controller, channel, path, *, gain=None, stop_event=None, enabled=lambda: True):
     handle = None
     epoch = controller.link_epoch
     try:
-        handle = start_player(channel, path, gain=gain)
+        metered = getattr(controller, "audio_driven_mouth", False)
+        handle = start_player(channel, path, gain=gain, track_envelope=metered)
         if handle is None:
             raise RuntimeError("Audio manager returned no playback handle")
         if handle.cancelled:
             return False
+        if metered:
+            controller.set_speech_handle(handle)
         controller.set_state("active")
-        while not handle.done.wait(0.02):
+        while not handle.done.wait(0.01) or (metered and callable(getattr(handle, "audible_pending", None)) and handle.audible_pending()):
             if (controller.stop_event.is_set() or (stop_event and stop_event.is_set())
                     or not enabled() or not controller.connected.is_set()
-                    or controller.link_epoch != epoch):
+                    or controller.link_epoch != epoch or handle.cancelled):
                 return False
+            if handle.done.is_set():
+                time.sleep(0.01)  # Drain scheduled DAC tail without spinning.
         return not handle.cancelled
     finally:
         stop_player(handle)
@@ -199,7 +258,7 @@ class AnimatronicShow:
                  quips, background=None,
                  background_channel=None, background_gain=0.89, interval=(10, 15),
                  device_id=None, simulate=False, once=False,
-                 enabled=lambda: True, controller=None):
+                 enabled=lambda: True, controller=None, finish_state=lambda: "off"):
         self.channel, self.gain = channel, gain
         self.quips = Path(quips)
         self.background_path = Path(background) if background else None
@@ -207,6 +266,7 @@ class AnimatronicShow:
         self.background_gain, self.interval = background_gain, interval
         self.controller = controller or self.controller_factory(device_id or self.default_device_id, simulate=simulate, off=True)
         self.once, self.enabled = once, enabled
+        self.finish_state = finish_state
         self.stop_event = threading.Event()
         self.lock = threading.RLock()
         self.thread = None
@@ -277,17 +337,20 @@ class AnimatronicShow:
         finally:
             stop_player(self.background)
             self.background = None
-            self.controller.set_state("off")
-            log_event(f"[{self.name}] Stopped and parked")
+            final_state = self.finish_state() if self.enabled() else "off"
+            self.controller.set_state(final_state)
+            log_event(f"[{self.name}] " + ("Returned to idle" if final_state == "standby" else "Stopped and parked"))
 
-    def stop(self):
+    def stop(self, *, park=True):
         with self.lock:
             self.stop_event.set()
-            self.controller.set_state("off")
+            if park:
+                self.controller.set_state("off")
             stop_player(self.background)
             if self.thread and self.thread is not threading.current_thread():
                 self.thread.join(timeout=3)
-            self.controller.set_state("off")
+            if park:
+                self.controller.set_state("off")
 
     def close(self):
         self.stop()

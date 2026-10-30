@@ -963,3 +963,42 @@ the pose after stopping that character's talking show. Stop the show before
 changing voice settings. **Test > Speakers** is a separate group containing
 speaker audio tests only. Restart MainCode and refresh the web page to load
 these controls.
+
+
+## Generic wireless MOSFET outputs
+
+Flash `Esp32/mosfetNode/mosfetNode.ino` and the updated USB transceiver. Configure
+the unique DEVICE_ID and OUTPUT_PINS list at the top of the sketch; pin count is
+automatic. All 20 available WROOM output GPIOs apart from UART0/flash are initially
+listed, including GPIO13. Remove entries to restrict remote switching.
+
+```python
+from control import remote_sensor_monitor as rsm
+rsm.mosfet(["MOSFET1"], 13, True)   # ON
+rsm.mosfet(["MOSFET1"], 13, False)  # OFF
+```
+
+Calls return a mapping of node IDs to delivery command IDs for `command_status`.
+Outputs start OFF and latch until changed or the node resets; send False from
+your effect's stop/shutdown routine. See [MOSFET setup](Esp32/mosfetNode/README.md)
+for pin restrictions, multiple-node calls and build commands.
+
+
+## Persistent animatronic idle and speech gain
+
+```python
+from control import animatronic_service
+prop = animatronic_service.pedro  # Also works with .george
+prop.start_idle()
+prop.talk(channel="CabinRoom_Wall", gain=0.5)
+# Idle continues during and after this quip.
+prop.stop_idle()  # Stop body motion without cancelling speech already playing.
+prop.stop()       # Stop everything and park.
+```
+
+`idle()` is an alias for `start_idle()`; `idle(False)` disables it. Idle-only
+needs no quips/audio. Mouth/beak timing during speech stays under the same pose
+worker as idle, so neither overwrites the other. `talk(gain=None)` uses the
+configured audio route's gain; gain values must be finite and nonnegative and
+may exceed 1 for amplification. Start idle / Stop idle are available in
+**Test > Animatronics**. Restart MainCode and refresh the page; no reflash needed.

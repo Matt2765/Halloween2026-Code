@@ -214,3 +214,40 @@ No board was flashed and no physical actuator test was performed. Before the
 show, verify both servo endpoints, digital output polarity, all four indicator
 states and the 2.5-second park by stopping the Pedro process while the bridge
 remains running. Check audio synchronization with Pedro's actual recordings.
+
+
+## Persistent idle and one-shot speech
+
+```python
+from control import animatronic_service
+animatronic_service.pedro.start_idle()  # Eyes, wings and neck; no random quips.
+animatronic_service.pedro.talk(channel="CabinRoom_Wall", gain=0.5)
+# Body idle continues during and after the line; speech controls the beak.
+animatronic_service.pedro.stop_idle()   # Stop body movement, preserve current speech.
+animatronic_service.pedro.stop()        # Stop audio and movement, park.
+```
+
+The same methods work on George. `gain=None` uses route gain; finite nonnegative
+values scale audio amplitude, including values above 1. Idle requires ONLINE but
+no audio assets. See [shared idle/gain behavior](../georgeNode/README.md#persistent-idle-and-speech-gain-both-characters).
+Restart MainCode for these Python-only changes; no reflash is needed.
+
+
+## Audio-driven beak timing
+
+Pedro's automatic speech now uses a per-playback audio envelope instead of the
+fixed beak rhythm. The audio mixer measures this voice in 10 ms windows and
+timestamps the levels against PortAudio's output/DAC clock. His beak stays
+closed before audible playback, during leading/trailing silence and pauses,
+and favors full strokes: 10 degrees open and 55 degrees closed. Hysteresis
+filters small level changes; a closed dwell of 90 ms and maximum open time of
+180 ms keep the beak visibly closing even during sustained speech. Silence
+closes immediately. Timing and thresholds are configurable on PedroController. Other room audio and ambience do not drive his beak. Gain/fade are included
+in the measured level. Body idle animation continues independently.
+
+Playback can finish decoding before its last queued block reaches the output;
+Pedro waits for that audible tail rather than assuming the playback request or
+decoder completion is the speaker clock. This is amplitude-based animation,
+not phoneme recognition; wireless delivery and servo travel still add physical
+latency. Existing talk/start calls use it automatically. George retains his
+existing mouth timing. Restart MainCode; no ESP reflash is needed.

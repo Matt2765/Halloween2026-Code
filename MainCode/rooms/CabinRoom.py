@@ -10,6 +10,7 @@ from control.houseLights import toggleHouseLights
 import threading
 import random
 from control.dimmer_controller import dim, start_glow
+from control import animatronic_service
 
 wallLanterns = False
 
@@ -51,12 +52,20 @@ def run():
 
             setDoorState(1, "CLOPEN")
 
+            animatronic_service.pedro.start_idle()
+
             m1Digital_Write(26, 0) #wall lantern 1
             m1Digital_Write(24, 0) #wall lantern 2
             m1Digital_Write(6, 0) #fireplace
 
             cabinMusic1 = play_audio("CabinRoom_Wall", "cabinAmbienceLong.wav", gain=.3, looping=True)
             cabinMusic2 = play_audio("CabinRoom_PA", "cabinAmbienceLong.wav", gain=.3, looping=True)
+
+            wait(10)
+
+            animatronic_service.pedro.talk("Pedro_Quip_08.wav", channel="CabinRoom_Wall", gain=2)
+
+            wait(10)
 
             while(
                 not house.Bathroom_state == "STANDBY" 
@@ -65,7 +74,8 @@ def run():
             ):
                 if BreakCheck() or house.Demo:
                     break
-                wait(1)
+                animatronic_service.pedro.talk(channel="CabinRoom_Wall", gain=2)
+                wait(20)
 
             wait(1)
 
@@ -126,7 +136,11 @@ def run():
             t.sleep(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
-            wait(10)  # 24s elapsed
+            wait(4)  # 24s elapsed
+
+            animatronic_service.pedro.talk("Pedro_Quip_07.wav", channel="CabinRoom_Wall", gain=2)
+
+            wait(6)
 
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,5))
             play_audio("CabinRoom_Wall", "thunder3.wav", gain=.5)
@@ -142,11 +156,15 @@ def run():
             wallLanterns = False
             m1Digital_Write(6, 1) #fireplace
 
-            wait(4)  # 40.5s elapsed
+            animatronic_service.pedro.stop_idle()
+
+            wait(3)  # 40.5s elapsed
 
             m1Digital_Write(22, 1) #strobe on
 
             wait(1)  # 41.5s elapsed
+
+            house.CabinRoom_state = "STANDBY"
 
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,6))
             play_audio("CabinRoom_Wall", "ES_Lightning Bolt 7 - SFX Producer.wav", gain=.5)
@@ -174,16 +192,15 @@ def run():
             play_audio("primary_LFE", "thunder2.wav", gain=.5)
 
             setDoorState(2, "CLOPEN")
-
             dim(22, channel=5) #dynamic hallway orange
 
             rsm.lantern(3, "flickering_on")
 
             m1Digital_Write(23, 0) #dynamic hallway lanterns
 
-            house.CabinRoom_state = "STANDBY"
+            wait(10)  # 55.3s elapsed
 
-            wait(5)  # 55.3s elapsed
+            dim(0, channel=5) #dynamic hallway orange
 
             while house.Basement_state != "ACTIVE":
                 if house.DoorState[3] == "CLOSED":

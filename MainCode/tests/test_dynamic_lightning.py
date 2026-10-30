@@ -46,9 +46,9 @@ class DynamicLightningTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertEqual(self.writes[-1], (4,1))
         self.assertTrue(self.handles)
-        self.assertTrue(all(handle.cancelled for handle in self.handles))
+        self.assertFalse(any(handle.cancelled for handle in self.handles))
 
-    def test_stop_during_on_pulse_cancels_light_and_own_audio(self):
+    def test_stop_during_on_pulse_turns_light_off_but_keeps_audio(self):
         worker=self.scope['blastLightning'](threaded=True)
         self.assertTrue(self.on.wait(1))
         self.stop_and_check(worker)
@@ -73,13 +73,13 @@ class DynamicLightningTests(unittest.TestCase):
         self.stop_and_check(worker)
         self.assertEqual(len(self.handles),1)
 
-    def test_restart_replaces_old_worker_and_audio(self):
+    def test_restart_replaces_old_worker_but_preserves_audio_tail(self):
         first=self.scope['blastLightning'](threaded=True)
         self.assertTrue(self.on.wait(1))
         second=self.scope['blastLightning'](threaded=True)
         first.join(1)
         self.assertFalse(first.is_alive())
-        self.assertTrue(self.handles[0].cancelled)
+        self.assertFalse(self.handles[0].cancelled)
         self.stop_and_check(second)
 
     def test_house_cancellation_interrupts_flash_waits(self):
@@ -103,7 +103,7 @@ class DynamicLightningTests(unittest.TestCase):
         self.assertEqual([value for _,value in self.writes], [0,1,0,1,0,1]*7+[1])
         self.assertFalse(any(handle.cancelled for handle in self.handles))
         self.scope['stopBlastLightning']()
-        self.assertTrue(all(handle.cancelled for handle in self.handles))
+        self.assertFalse(any(handle.cancelled for handle in self.handles))
 
 
 if __name__ == '__main__':
