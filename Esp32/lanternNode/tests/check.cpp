@@ -21,7 +21,7 @@ int main() {
  assert(command(cue(1,OFF,0))==INVALID);
  buttonAt(100,0);buttonAt(130,0);
  assert(synced && generation==1 && nextCommand==1);
- assert(command(cue(2,OFF,1))==INVALID);
+ assert(command(cue(0,OFF,1))==INVALID);
  assert(command(cue(1,SOLID_ON,1))==ACCEPTED && nextCommand==2);
  assert(command(cue(1,OFF,1))==INVALID);
  buttonAt(200,1);buttonAt(230,1);assert(flashSteps==6 && flashStep==100);
@@ -110,6 +110,20 @@ int main() {
  status.payload[0]=7;assert(!shape(status));
  Packet old;old.type=COMMAND;old.flags=ACK_REQUIRED;old.length=11;
  strcpy(old.src,"BRIDGE");strcpy(old.dst,"SERVO1");old.payload[4]=MOVE;assert(shape(old));
+ // Group progress may skip a lost cue, but never replay old effects.
+ resetSync(true,fakeNow);uint32_t group=generation;
+ assert(command(cue(1,SOLID_ON,group))==ACCEPTED && nextCommand==2);
+ assert(command(cue(3,OFF,group))==ACCEPTED && nextCommand==4);
+ assert(lightState==OFF);
+ assert(command(cue(2,STROBE,group))==INVALID && lightState==OFF);
+ assert(command(cue(3,STROBE,group))==INVALID && lightState==OFF);
+ // Even a lost first cue may catch up to the group's current cue.
+ resetSync(true,fakeNow);group=generation;
+ assert(command(cue(7,FLICKERING_ON,group))==ACCEPTED && nextCommand==8);
+ resetSync(true,fakeNow);
+ assert(command(cue(8,STROBE,group))==INVALID && nextCommand==1);
+ assert(command(cue(1,SOLID_ON,generation))==ACCEPTED && nextCommand==2);
+ assert(command(cue(0xffffffff,STROBE,generation))==INVALID);
  puts("Lantern firmware behavior and wire compatibility checks passed");
 }
 

@@ -1,3 +1,4 @@
+#define PEDRO_WINGS_ENABLED 1 // Retain coverage for the restored-servo configuration.
 #include "../pedroNode.ino"
 #include <cassert>
 #include <cstdio>

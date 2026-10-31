@@ -24,7 +24,6 @@ RELAYS = [
     ("bath_strobe", "Bathroom", "Strobe", 35, 0),
     ("bath_mirror", "Bathroom", "Mirror light", 33, 0),
     ("bath_magic", "Bathroom", "Magic light", 31, 0),
-    ("shower_ambient", "Shower Hallway", "Blacklight", 30, 0),
     ("shower_strobe", "Shower Hallway", "Strobe", 32, 0),
     ("shower_light", "Shower Hallway", "Shower light", 34, 0),
     ("shower_lanterns", "Shower Hallway", "Lanterns", 36, 0),
@@ -34,6 +33,7 @@ RELAYS = [
     ("dynamic_strip", "Dynamic Hallway", "Lightning strip", 4, 0),
     ("dynamic_strobe", "Dynamic Hallway", "Strobe", 7, 0),
     ("dynamic_lanterns", "Dynamic Hallway", "Lanterns", 23, 0),
+    ("dynamic_blacklights", "Dynamic Hallway", "Blacklights", 9, 0),
     ("basement_spot", "Basement", "Spotlight", 3, 0),
     ("pallet_strobe", "Pallet Hallway", "Strobe", 29, 0),
     ("pallet_backlight", "Pallet Hallway", "Pallet backlight", 27, 0),
@@ -53,7 +53,6 @@ DIMMERS = [
 ]
 UNASSIGNED_CONTROLS = [
     ("Bathroom", "Mirror servo", "Servo device ID needs to be assigned"),
-    ("Dynamic Hallway", "Blacklights", "Cable I, red; Arduino pin needed"),
     ("Dynamic Hallway", "Smoke machine 2", "Cable J, red/black; Arduino pin needed"),
     ("Graveyard", "Wendigo", "Device/pin and command mapping needed"),
 ]

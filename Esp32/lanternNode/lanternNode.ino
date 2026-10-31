@@ -89,10 +89,13 @@ Code command(const Received& r) {
   if(p.type!=COMMAND || p.length!=15 || p.payload[4]!=LANTERN_STATE) return INVALID;
   auto peer=radio.registry.find(p.src); if(peer&&peer->conflict) return CONFLICT;
   uint16_t value=get16(p.payload+5); uint32_t cue=get32(p.payload+7);
-  if(!synced || get32(p.payload+11)!=generation || cue!=nextCommand || cue==0xffffffff || value>LANTERN_STATE_MAX) return INVALID;
+  // The host latches group membership at cue 1. A newer group cue replaces
+  // missed effects; delayed/duplicate cues never rewind the lantern. A fresh
+  // button sync changes generation, rejecting all commands from the old group.
+  if(!synced || get32(p.payload+11)!=generation || cue<nextCommand || cue==0 || cue==0xffffffff || value>LANTERN_STATE_MAX) return INVALID;
   uint32_t now=millis();
   lightTick(now); // Refresh elapsed fades/output before deciding whether it is dark.
-  nextCommand++; setState(LightState(value),now);
+  nextCommand=cue+1; setState(LightState(value),now);
   commandSession=p.session; commandSequence=p.seq; report(); return ACCEPTED;
 }
 void lightTick(uint32_t now) {

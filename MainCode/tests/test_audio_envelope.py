@@ -94,6 +94,21 @@ class AudioEnvelopeTests(unittest.TestCase):
         self.render(10);self.now=10.065
         self.assertEqual(handle.audio_level(),1)
 
+    def test_six_channel_device_routes_surround_and_rejects_unavailable_back_output(self):
+        class Source:
+            def read(self,frames):return np.ones((frames,1),np.float32),False
+            def close(self):pass
+        self.scope['_source']=lambda *args:Source()
+        self.mixer.channels=6
+        self.scope['_resolve_named_target']=lambda name:('secondary','one',4 if name=='secondary_SL' else 6,1)
+        self.scope['_submit'](Path('voice.wav'),'secondary_SL','one',0,1,False,True,False,True)
+        output=np.zeros((10,6),np.float32)
+        self.mixer._callback(output,10,None,None)
+        np.testing.assert_array_equal(output[:,4],np.ones(10))
+        np.testing.assert_array_equal(output[:,1],np.zeros(10))
+        with self.assertRaisesRegex(ValueError,'6 output channels'):
+            self.scope['_submit'](Path('voice.wav'),'secondary_BL','one',0,1,False,True,False,True)
+
     def test_play_audio_forwards_tracking_to_named_and_all_routes(self):
         for target,route in (('Pedro','play_to_named_channel'),('all','play_to_all_channels')):
             calls=[]

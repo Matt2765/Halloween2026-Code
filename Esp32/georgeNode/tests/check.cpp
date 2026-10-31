@@ -16,7 +16,9 @@ int main() {
  assert(usToAngle(mouth.current)==120 && usToAngle(neck.current)==115);
  auto invalid=pose(ACTIVE,119);fakeNow=1000;
  assert(command(invalid)==INVALID && lastController==500);
- invalid=pose(ACTIVE,180,116);assert(command(invalid)==INVALID);
+ assert(command(pose(ACTIVE,180,180))==ACCEPTED);
+ assert(usToAngle(neck.current)==180);
+ invalid=pose(ACTIVE,180,181);assert(command(invalid)==INVALID);
  invalid=pose(ACTIVE);invalid.packet.payload[15]=2;assert(command(invalid)==INVALID);
  invalid=pose(ACTIVE);invalid.packet.length=11;assert(command(invalid)==INVALID);
  assert(command(pose(OFF))==ACCEPTED && controllerConnected && state==OFF);

@@ -9,14 +9,15 @@ boot sessions, acknowledgements and retries. Python owns audio and motion timing
 | --- | --- | --- |
 | Eyes | 13 | Digital, active HIGH (configurable) |
 | Mouth | 14 | Servo: open 120 degrees, closed/parked 180 degrees |
-| Neck | 26 | Head rotation: forward/parked 80 degrees; idle moves between 5 and 115 degrees |
+| Neck | 26 | Head rotation: forward/parked 80 degrees; default idle moves between 5 and 180 degrees |
 
 Servo pulses use the existing Pedro calibration: 50 Hz, 500..2500 microseconds
 for 0..180 degrees. Supply servos externally with a shared ground. Eyes use a
 suitable driver for their load. `EYES_ACTIVE_HIGH` changes eye-driver polarity.
 The old startup mouth test/infinite loop is not carried over. The closed-mouth
 pose (180 degrees) is used for standby and parking. Node firmware enforces
-mouth 120..180 and neck 0..115 before applying any part of a pose.
+mouth 120..180 and neck 0..180 before applying any part of a pose.
+Reflash George to replace the older firmware's 115-degree neck limit.
 
 ## Main-system use
 
@@ -82,6 +83,7 @@ from control import animatronic_service
 
 character = animatronic_service.pedro  # Or animatronic_service.george
 character.start_idle()                # Body idle only; no audio/quips required.
+animatronic_service.george.start_idle(neck_min=50, neck_max=180)
 character.talk(channel="Basement", gain=0.5)
 character.talk("Quip01.mp3", channel="Basement", gain=0.8)
 # Idle continues after each quip; only speech controls the mouth/beak.
@@ -163,3 +165,15 @@ Host-side behavior tests:
 .tools/george-check.exe
 python -m unittest discover -s MainCode/tests -p test_animatronics.py
 ```
+
+
+## Finish speech through a node restart
+
+George's current quip now plays to the end if his ESP32 restarts or its wireless
+link drops. Motion parks when that happens and is not replayed/resumed midway
+through the line on reconnection. After playback completes, the normal idle/
+parking policy applies, including Basement's extra 15 seconds of idle. A new
+quip still waits for an available hardware link. Explicit stop, manual takeover
+and system shutdown continue cancelling speech immediately. This policy is
+configured by `GeorgeController.finish_audio_on_link_loss=True`; Pedro retains
+his existing link-loss cancellation policy. Restart MainCode; no reflash needed.

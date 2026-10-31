@@ -12,7 +12,7 @@ from Animatronics.core import AnimatronicController, AnimatronicShow
 from Animatronics.pedro import ASSETS, BEAK_TIMES, EYES_ON_SECONDS, EYES_BLINK_SECONDS
 
 MOUTH_OPEN, MOUTH_CLOSED = 120, 180
-NECK_REST, NECK_LOW, NECK_HIGH = 80, 5, 115  # 80 degrees faces forward.
+NECK_REST, NECK_LOW, NECK_HIGH = 80, 5, 180  # 80 degrees faces forward.
 
 
 class Motion:
@@ -51,9 +51,11 @@ class Motion:
 
 class GeorgeController(AnimatronicController):
     name, kind = "George", "george"
+    finish_audio_on_link_loss = True
     motion_factory = Motion
+    idle_neck_range = (NECK_LOW, NECK_HIGH)
     rest_pose = dict(mouth=MOUTH_CLOSED, neck=NECK_REST, eyes=False)
-    output_limits = dict(mouth=(120, 180), neck=(0, 115), eyes=bool)
+    output_limits = dict(mouth=(120, 180), neck=(0, 180), eyes=bool)
 
     def __init__(self, device_id="GEORGE1", **kwargs):
         super().__init__(device_id, **kwargs)

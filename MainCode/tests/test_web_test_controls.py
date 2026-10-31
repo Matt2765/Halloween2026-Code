@@ -91,6 +91,7 @@ class WebTestControlsTests(unittest.TestCase):
         tree.body = [n for n in tree.body if getattr(n, 'name', None) == 'shutdown']
         lights = Mock()
         scope = dict(house=SimpleNamespace(), rsm=self.rsm, log_event=Mock(),
+                     flow=SimpleNamespace(stop=Mock()),
                      DOOR_SOLENOID_PINS={}, apply_door_shutdown_state=Mock(),
                      stop_all=Mock(), dim=Mock(), m1Digital_Write=Mock(),
                      t=SimpleNamespace(sleep=Mock()), toggleHouseLights=lights)

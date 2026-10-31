@@ -108,6 +108,19 @@ class AnimatronicTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("Timed out waiting for worker")
 
+    def test_stop_talking_cancels_audio_without_disabling_idle(self):
+        handle = Handle()
+        (self.character.quips / "test.wav").touch()
+        with patch.object(self.core, "start_player", return_value=handle):
+            self.assertTrue(self.character.start_idle())
+            self.assertTrue(self.character.talk())
+            self.until(lambda: self.character._controller.state == "active")
+            self.assertTrue(self.character.stop_talking())
+            self.assertTrue(handle.cancelled)
+            self.assertFalse(self.character.status()["running"])
+            self.assertTrue(self.character.status()["idle_enabled"])
+            self.assertEqual(self.character._controller.state, "standby")
+
     def test_character_calibration_and_separate_asset_paths(self):
         self.assertEqual(self.george.GeorgeController.rest_pose, dict(mouth=180, neck=80, eyes=False))
         self.assertEqual(self.pedro.PedroController.rest_pose, dict(wings=5, beak=55, neck=False, eyes=False))
@@ -116,13 +129,45 @@ class AnimatronicTests(unittest.TestCase):
         self.assertEqual(self.service.pedro.quips.parent, self.service.george.quips.parent)
         self.assertTrue(self.service.pedro.quips.is_relative_to(ROOT.parent.parent / "Assets"))
 
+    def test_idle_neck_limits_cover_both_endpoints_and_survive_speech(self):
+        class FastMotion(self.george.Motion):
+            def pose(self, state, now):
+                pose = super().pose(state, now)
+                if state != "off":
+                    pose["neck"] = 5 if int(now * 20) % 2 else 180
+                return pose
+        with patch.object(self.character.controller_factory, "motion_factory", FastMotion):
+            self.assertTrue(self.character.start_idle(neck_min=60, neck_max=100))
+            self.until(lambda: {60, 100} <= {p["neck"] for p in self.transport.calls})
+            controller = self.character._controller
+            controller.set_state("active")
+            start = len(self.transport.calls)
+            self.until(lambda: len(self.transport.calls) > start + 3)
+            self.assertTrue(all(60 <= p["neck"] <= 100 for p in self.transport.calls[start:]))
+            self.character.stop()
+            self.until(lambda: self.transport.calls[-1]["state"] == "off")
+            self.assertEqual(self.transport.calls[-1]["neck"], 80)
+            self.character.start_idle()
+            self.assertEqual(controller.idle_ranges, {})
+
+    def test_idle_neck_limits_validate_before_starting(self):
+        for settings in (dict(neck_min=110, neck_max=90), dict(neck_min=-1),
+                         dict(neck_max=181), dict(neck_min=True), dict(neck_max=90.5)):
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                self.character.start_idle(**settings)
+        self.assertIsNone(self.character._controller)
+        with self.assertRaises(ValueError):
+            self.service.pedro.start_idle(neck_min=10, neck_max=40)
+        self.assertTrue(self.character.start_idle(neck_min=90, neck_max=90))
+        self.until(lambda: any(p["neck"] == 90 for p in self.transport.calls))
+
     def test_talking_uses_old_angles_and_standby_closes_mouth(self):
         motion = self.george.Motion(0, random.Random(1))
         self.assertEqual(motion.pose("active", 0)["mouth"], 120)
         self.assertEqual(motion.pose("active", .21)["mouth"], 180)
         self.assertEqual(motion.pose("standby", 1)["mouth"], 180)
         self.assertEqual(motion.pose("off", 2), dict(state="off", mouth=180, neck=80, eyes=False))
-        self.assertEqual(motion.pose("standby", 100)["neck"], 115)
+        self.assertEqual(motion.pose("standby", 100)["neck"], 180)
 
     def test_manual_outputs_merge_and_heartbeat_without_random_motion(self):
         self.assertTrue(self.character.neck(90))
@@ -144,11 +189,12 @@ class AnimatronicTests(unittest.TestCase):
                 super().__init__(transport=transport, **kwargs)
         character = self.service.Pedro("Pedro", self.pedro.PedroShow, Controller)
         try:
-            self.assertTrue(character.wings(115))
+            with self.assertRaises(ValueError):
+                character.wings(115)
             self.assertTrue(character.beak(10))
             self.assertTrue(character.neck(True))
             self.until(lambda: transport.calls[-1].get("neck") is True)
-            self.assertEqual(transport.calls[-1]["wings"], 115)
+            self.assertEqual(transport.calls[-1]["wings"], 5)
             self.assertEqual(transport.calls[-1]["beak"], 10)
             with self.assertRaises(ValueError):
                 character.neck(90)
@@ -166,7 +212,7 @@ class AnimatronicTests(unittest.TestCase):
         self.assertEqual(self.character.status()["mode"], "off")
 
     def test_invalid_manual_outputs_never_start_hardware(self):
-        for outputs in (dict(neck=116), dict(neck=True), dict(mouth=119), dict(eyes=1), dict(wings=5), dict(ramp_ms=-1)):
+        for outputs in (dict(neck=181), dict(neck=True), dict(mouth=119), dict(eyes=1), dict(wings=5), dict(ramp_ms=-1)):
             with self.subTest(outputs=outputs), self.assertRaises(ValueError):
                 self.character.pose(**outputs)
         self.assertIsNone(self.character._controller)
@@ -277,6 +323,64 @@ class AnimatronicTests(unittest.TestCase):
         level[0]=0
         self.assertEqual(controller._audio_mouth(.34), ("beak",55))
         self.assertEqual(controller._audio_mouth(.8), ("beak",55))
+
+    def test_george_finishes_audio_through_restart_without_replaying_motion(self):
+        (self.character.quips / "hello.wav").touch()
+        character, transport = self.make_character("george")
+        handle = Handle()
+        with patch.object(self.core, "start_player", return_value=handle) as player:
+            self.assertTrue(character.start_idle())
+            self.assertTrue(character.talk("hello.wav"))
+            self.until(lambda: transport.calls and transport.calls[-1]["state"] == "active")
+            epoch = character._controller.link_epoch
+            transport.session += 1
+            self.until(lambda: character._controller.link_epoch > epoch)
+            self.until(lambda: character._controller.connected.is_set() and transport.calls[-1]["state"] == "off")
+            self.assertTrue(character.status()["running"])
+            self.assertFalse(handle.cancelled)
+            transport.session += 1  # Another reboot must not restart or cancel the line.
+            self.until(lambda: character._controller.link_epoch > epoch + 1)
+            self.assertFalse(handle.cancelled)
+            self.assertTrue(character.status()["running"])
+            player.assert_called_once()
+            handle.done.set()
+            self.until(lambda: not character.status()["running"])
+            self.assertEqual(character.status()["mode"], "idle")
+
+    def test_george_link_outage_keeps_audio_but_explicit_stop_still_cancels(self):
+        (self.character.quips / "hello.wav").touch()
+        handle = Handle()
+        with patch.object(self.core, "start_player", return_value=handle), patch.object(self.core, "LINK_LOSS_GRACE_SECONDS", .05):
+            self.assertTrue(self.character.talk("hello.wav"))
+            self.until(lambda: self.transport.calls and self.transport.calls[-1]["state"] == "active")
+            self.transport.available = False
+            self.until(lambda: not self.character._controller.connected.is_set())
+            self.assertTrue(self.character.status()["running"])
+            self.assertFalse(handle.cancelled)
+            self.character.stop()
+            self.assertTrue(handle.cancelled)
+            self.assertFalse(self.character.status()["running"])
+
+    def test_shutdown_still_cancels_george_speech(self):
+        (self.character.quips / "hello.wav").touch()
+        handle = Handle()
+        with patch.object(self.core, "start_player", return_value=handle):
+            self.assertTrue(self.character.talk("hello.wav"))
+            self.until(lambda: self.transport.calls and self.transport.calls[-1]["state"] == "active")
+            self.house.systemState = "SoftShutdown"
+            self.until(lambda: handle.cancelled)
+            self.until(lambda: not self.character.status()["running"])
+
+    def test_pedro_restart_still_cancels_his_speech(self):
+        (self.character.quips / "hello.wav").touch()
+        character, transport = self.make_character("pedro")
+        handle = Handle()
+        with patch.object(self.core, "start_player", return_value=handle):
+            self.assertTrue(character.talk("hello.wav"))
+            self.until(lambda: transport.calls and transport.calls[-1]["state"] == "active")
+            transport.session += 1
+            self.until(lambda: handle.cancelled)
+            self.until(lambda: not character.status()["running"])
 
     def test_idle_survives_multiple_quips_and_forwards_gain_for_both_characters(self):
         (self.character.quips / "hello.wav").touch()

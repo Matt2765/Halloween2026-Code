@@ -34,6 +34,7 @@ class AnimatronicController:
         self.thread = None
         self.manual_pose = None
         self.idle_motion = True
+        self.idle_ranges = {}
         self._speech_handle = None
         self._speech_peak = 0.03
         self._mouth_opening = 0.0
@@ -89,10 +90,12 @@ class AnimatronicController:
         opened = low if closed == high else high
         return mouth, opened if is_open else closed
 
-    def set_idle_motion(self, enabled):
+    def set_idle_motion(self, enabled, *, ranges=None):
         """Gate non-mouth animation without changing speech state or manual poses."""
         with self.lock:
             self.idle_motion = bool(enabled)
+            if ranges is not None:
+                self.idle_ranges = dict(ranges)
 
     def set_outputs(self, **outputs):
         """Hold a complete manual pose; callers validate character-specific limits."""
@@ -113,7 +116,7 @@ class AnimatronicController:
                 self.state = "off"
             self.manual_pose = None
             if self.state == "active":
-                self.state = "standby"
+                self.state = "off" if getattr(self, "finish_audio_on_link_loss", False) else "standby"
         motion.reset(now)
 
     def _run(self):
@@ -173,6 +176,9 @@ class AnimatronicController:
                         pose = dict(self.manual_pose)
                     else:
                         pose = motion.pose(self.state, now)
+                        if self.state != "off":
+                            for output, (low, high) in self.idle_ranges.items():
+                                pose[output] = max(low, min(high, pose[output]))
                         if self.state == "active" and self._speech_handle is not None and callable(getattr(self._speech_handle, "audio_level", None)):
                             mouth, angle = self._audio_mouth(now)
                             pose[mouth] = angle
@@ -224,6 +230,20 @@ def start_player(channel, path, *, background=False, gain=None, track_envelope=F
 def play_quip(controller, channel, path, *, gain=None, stop_event=None, enabled=lambda: True):
     handle = None
     epoch = controller.link_epoch
+    keep_audio = getattr(controller, "finish_audio_on_link_loss", False)
+    motion_interrupted = False
+
+    def link_changed():
+        return not controller.connected.is_set() or controller.link_epoch != epoch
+
+    def park_motion():
+        nonlocal motion_interrupted
+        if not motion_interrupted:
+            controller.set_state("off")
+            motion_interrupted = True
+            from utils.tools import log_event
+            log_event(f"[{controller.name}] Wireless link changed; finishing current audio with motion parked")
+
     try:
         metered = getattr(controller, "audio_driven_mouth", False)
         handle = start_player(channel, path, gain=gain, track_envelope=metered)
@@ -231,14 +251,22 @@ def play_quip(controller, channel, path, *, gain=None, stop_event=None, enabled=
             raise RuntimeError("Audio manager returned no playback handle")
         if handle.cancelled:
             return False
-        if metered:
-            controller.set_speech_handle(handle)
-        controller.set_state("active")
+        if link_changed():
+            if not keep_audio:
+                return False
+            park_motion()
+        else:
+            if metered:
+                controller.set_speech_handle(handle)
+            controller.set_state("active")
         while not handle.done.wait(0.01) or (metered and callable(getattr(handle, "audible_pending", None)) and handle.audible_pending()):
             if (controller.stop_event.is_set() or (stop_event and stop_event.is_set())
-                    or not enabled() or not controller.connected.is_set()
-                    or controller.link_epoch != epoch or handle.cancelled):
+                    or not enabled() or handle.cancelled):
                 return False
+            if link_changed():
+                if not keep_audio:
+                    return False
+                park_motion()
             if handle.done.is_set():
                 time.sleep(0.01)  # Drain scheduled DAC tail without spinning.
         return not handle.cancelled

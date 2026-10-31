@@ -6,7 +6,7 @@ const char* DEVICE_ID = "GEORGE1";
 constexpr int NECK_PIN=26, MOUTH_PIN=14, EYES_PIN=13;
 constexpr bool EYES_ACTIVE_HIGH=true;
 // George was William Wallace: mouth/neck are servos; eyes are digital.
-constexpr int NECK_REST=80, NECK_MIN=0, NECK_MAX=115; // Head faces forward at 80 degrees.
+constexpr int NECK_REST=80, NECK_MIN=0, NECK_MAX=180; // Head faces forward at 80 degrees.
 constexpr int MOUTH_REST=180, MOUTH_MIN=120, MOUTH_MAX=180;
 constexpr int SERVO_MIN_US=500, SERVO_MAX_US=2500;
 constexpr uint32_t CONTROLLER_TIMEOUT_MS=2500, STATUS_MS=500;

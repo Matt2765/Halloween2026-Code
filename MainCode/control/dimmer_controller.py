@@ -4,6 +4,7 @@ import math
 import random
 import threading
 import time
+import atexit
 from collections import deque
 import serial
 from utils.tools import BreakCheck, log_event
@@ -39,6 +40,25 @@ _global_stop_evt = threading.Event()
 _effects_lock = threading.Lock()
 _effects = {}  # channel -> (stop event, thread)
 _wire_debug = False
+_lifecycle_lock = threading.RLock()
+_recovery_enabled = threading.Event()
+_recovery_thread = None
+_initializing_thread = None
+
+
+def _recover_loop():
+    while True:
+        time.sleep(1.0)
+        if not _recovery_enabled.is_set():
+            continue
+        with _lifecycle_lock:
+            if not _recovery_enabled.is_set():
+                continue
+            if _transport_failed or _ser is None or (_rx_thread is not None and not _rx_thread.is_alive()):
+                log_event(f"[dimmer_controller] Reconnecting on {PORT}; previous effects will not be replayed")
+                _initialize_once()
+        if _transport_failed or _ser is None:
+            time.sleep(4.0)
 
 
 def _channel_index(channel):
@@ -115,6 +135,8 @@ def _command(line, expected, *, wait=None, timeout=None):
     wait = _ACK_PACING if wait is None else wait
     timeout = _ACK_TIMEOUT_S if timeout is None else timeout
     with _lock:
+        if _initializing_thread is not None and _initializing_thread != threading.get_ident():
+            return False
         if _transport_failed:
             return False
         remaining = _MIN_WRITE_INTERVAL - (time.monotonic() - _last_send_ts)
@@ -150,10 +172,23 @@ def _command(line, expected, *, wait=None, timeout=None):
         return ok
 
 
-def init(port: str | None = None):
-    """Verify updated firmware and leave all channels OFF. True=hardware, False=simulation."""
+def _initialize_once(port: str | None = None):
+    global _initializing_thread, _transport_failed
+    _initializing_thread = threading.get_ident()
+    try:
+        return _open_transport(port)
+    except Exception as error:
+        _transport_failed = True
+        log_event(f"[dimmer_controller] Recovery deferred: {error}")
+        return False
+    finally:
+        _initializing_thread = None
+
+
+def _open_transport(port: str | None = None):
+    """Verify updated firmware and leave all channels OFF. False means unavailable."""
     global _ser, _simulated, PORT, _rx_thread, _transport_failed, _last_send_ts
-    close()
+    _close_transport()
     if port:
         PORT = port
     _transport_failed = False
@@ -179,14 +214,26 @@ def init(port: str | None = None):
         log_event(f"[dimmer_controller] KRIDA 8CH connected on {PORT}; all OFF")
         return True
     except Exception as exc:
-        close()
-        _transport_failed = False
+        _close_transport()
+        _transport_failed = True
         log_event(f"[dimmer_controller] Connection failed: {exc}")
-        log_event("[dimmer_controller] Running in simulated mode.")
+        log_event("[dimmer_controller] Outputs unavailable; automatic reconnect pending.")
         return False
 
 
-def close():
+def init(port: str | None = None):
+    """Initialize hardware and enable a single background recovery worker."""
+    global _recovery_thread
+    with _lifecycle_lock:
+        connected = _initialize_once(port)
+        _recovery_enabled.set()
+        if _recovery_thread is None or not _recovery_thread.is_alive():
+            _recovery_thread = threading.Thread(target=_recover_loop, name="Dimmer recovery", daemon=True)
+            _recovery_thread.start()
+        return connected
+
+
+def _close_transport():
     """Stop workers, request all OFF, then release the port."""
     global _ser, _simulated, _rx_thread
     stop_flicker(join=True)
@@ -199,11 +246,28 @@ def close():
     if _rx_thread is not None:
         _rx_thread.join(timeout=TIMEOUT + 0.5)
     if _ser is not None:
-        _ser.close()
+        try:
+            _ser.close()
+        except (OSError, serial.SerialException):
+            pass
     _ser = None
+    if _rx_thread is not None and _rx_thread.is_alive():
+        _rx_thread.join(timeout=TIMEOUT + 0.5)
+        if _rx_thread.is_alive():
+            raise RuntimeError("Previous dimmer reader is still stopping; refusing to create another")
     _rx_thread = None
     _simulated = True
     _last_sent_int[:] = [None] * CHANNELS
+
+
+def close():
+    """Explicit close disables recovery; it never reopens a deliberately closed port."""
+    with _lifecycle_lock:
+        _recovery_enabled.clear()
+        _close_transport()
+
+
+atexit.register(close)
 
 
 def request_stop():

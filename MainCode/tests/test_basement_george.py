@@ -20,7 +20,7 @@ class BasementGeorgeTests(unittest.TestCase):
             workers.append(worker)
             return worker
         def neck(angle):
-            self.assertTrue(type(angle) is int and 0 <= angle <= 115)
+            self.assertTrue(type(angle) is int and 80 <= angle <= 180)
             events["neck"].set()
         george = SimpleNamespace(mouth=Mock(), neck=Mock(side_effect=neck),
                                   eyes=Mock(side_effect=lambda on: events["eyes"].set()))
@@ -60,7 +60,7 @@ class BasementGeorgeTests(unittest.TestCase):
         george.mouth.assert_called_once_with(120)
         self.assertTrue(george.neck.called)
         self.assertTrue(george.eyes.called)
-        george.start_idle.assert_called_once_with()
+        george.start_idle.assert_called_once_with(neck_min=80, neck_max=180)
         george.talk.assert_called_once_with(channel="Basement")
         self.assertEqual(george.status.call_count, 2)
         self.assertEqual(self.sequence_wait.call_args_list, [unittest.mock.call(15), unittest.mock.call(15)])

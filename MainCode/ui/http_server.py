@@ -43,8 +43,9 @@ function text(id,value){$(id).textContent=value}function card(parent,title,value
 function age(ms){return ms==null?'--':(ms/1000).toFixed(1)+'s'}
 function renderDropdownButton(reading){const value=reading?.value,status=reading?.status||{};text('dropdownButton',(value===true?'True (pressed)':value===false?'False (released)':'unknown ('+(status.state||'unavailable')+')')+' | '+age(status.age_ms))}
 function renderRoomStates(rooms){const rows=[];for(const room of rooms){const row=document.createElement('tr');for(const value of [room.name,room.state]){const cell=document.createElement('td');cell.textContent=value;row.append(cell)}rows.push(row)}$('roomStates').replaceChildren(...rows)}
+function renderSensorRows(s){const pirs=s.pirs||[],buttons=s.buttons||[],tofs=s.tofs||[];$('sensorRows').replaceChildren();for(let i=0;i<Math.max(pirs.length,buttons.length,tofs.length);i++){const p=pirs[i],b=buttons[i],t=tofs[i];const row=document.createElement('tr');for(const v of [i+1,t?(t.value==null?t.status.state:t.value+' mm'):'--',b?(b.value===true?'held':b.value===false?'sleep':'unknown')+' / '+age(b.status.age_ms):'--',p?(p.available?(p.output?'HIGH':'LOW')+(p.ready?' ready':' warming'):p.state):'--']){const td=document.createElement('td');td.textContent=v;row.append(td)}$('sensorRows').append(row)}}
 function render(s){state=s;renderDropdownButton(s.dropdown_button);renderAnimatronicTests(s.animatronics||{});renderRoomStates(s.rooms||[]);text('lights','Lights: '+(s.lights?'ON':'OFF')+' | Toggle');text('overview',s.system+' | House '+(s.active?'active':'idle'));text('pedro','Pedro '+(s.pedro.running?(s.pedro.connected?'running':'waiting for link'):s.pedro.mode==='idle'?'idle animations':'stopped')+' | '+s.pedro.channel+(s.pedro.error?' | '+s.pedro.error:''));$('doors').replaceChildren();for(const d of s.doors){const row=document.createElement('div');row.className='door-row';const info=document.createElement('div');const title=document.createElement('strong');title.textContent='Door '+d.id+' - '+d.state;const detail=document.createElement('small');detail.textContent='Target: '+d.target+' | '+d.sensor+': '+(d.pir?.available?(d.pir.output?'HIGH':'LOW')+(d.pir.ready?' ready':' warming'):d.pir?.state||'unavailable')+(d.bypass?' | BYPASS ACTIVE':'');info.append(title,detail);const button=document.createElement('button');const opening=d.target==='CLOSED'||d.state==='CLOSING';button.dataset.action='/Door'+d.id+(opening?'Open':'Close');button.textContent=opening?'Open':'Close';row.append(info,button);$('doors').append(row)}
-$('sensorRows').replaceChildren();for(let i=0;i<6;i++){const p=s.pirs[i],b=s.buttons[i],t=s.tofs[i];const row=document.createElement('tr');for(const v of [i+1,t.value==null?t.status.state:t.value+' mm',(b.value===true?'held':b.value===false?'sleep':'unknown')+' / '+age(b.status.age_ms),p.available?(p.output?'HIGH':'LOW')+(p.ready?' ready':' warming'):p.state]){const td=document.createElement('td');td.textContent=v;row.append(td)}$('sensorRows').append(row)}
+renderSensorRows(s);
 text('health',s.health.disabled?'RSM DISABLED':!s.health.connected?'Bridge unavailable':'Bridge connected'+(s.health.error?.message?' | Last USB warning: '+(s.health.error.message==='Oversized USB line'?'Discarded a serial message longer than 1,024 bytes':s.health.error.message):''));text('failure',s.failure?JSON.stringify(s.failure,null,2):'No command failure');
 $('servos').replaceChildren();for(const [id,v] of Object.entries(s.servos))card('servos',id,(v.output_angle==null||['stale','unavailable','conflict'].includes(v.state)?v.state:'PWM '+v.output_angle+' deg'+(v.moving?' | moving':''))+' / '+age(v.age_ms));$('lanterns').replaceChildren();for(const [id,v] of Object.entries(s.lanterns))card('lanterns',id,v.available&&v.lantern_state?v.lantern_state.replaceAll('_',' ')+' | '+(v.synced?'wait '+v.next_command_id:'free'):v.state);lock(false)}
 function lock(stale){document.querySelectorAll('[data-action],[data-test]' ).forEach(b=>b.disabled=(busy&&b.id!=='emergency')||(stale&&b.id!=='emergency'))}
@@ -92,7 +93,7 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
 
     def log_request(self, code="-", size="-"):
         # Live polling is expected traffic, not an operational event.
-        if self.path == "/api/status" and str(code) == "200":
+        if self.path in ("/api/status", "/api/audio") and str(code) == "200":
             return
         super().log_request(code, size)
 
@@ -151,6 +152,10 @@ class HalloweenHTTP(BaseHTTPRequestHandler):
             self._json(200, result)
 
     def do_GET(self):
+        if self.path == "/api/audio":
+            from control.audio_manager import audio_diagnostics
+            self._json(200, audio_diagnostics())
+            return
         if self.path == "/api/tests":
             from control.web_tests import catalog
             self._json(200, catalog())
@@ -254,12 +259,15 @@ def status_snapshot():
     from control import remote_sensor_monitor as rsm
     from control.doors import DOOR_SOLENOID_PINS, DOOR_SENSOR_IDS, DOOR_SENSOR_BYPASS
     from control.animatronic_service import pedro_status, george_status
+    from control.group_flow import flow
     dropdown_status = rsm.device_status("DROPDOWN1")
     dropdown_value = rsm.get_button_value("DROPDOWN1") if dropdown_status.get("available") else None
     return {
         "system": house.systemState, "active": house.HouseActive,
         "lights": house.houseLights, "pedro": pedro_status(),
         "animatronics": {"pedro": pedro_status(), "george": george_status()},
+        "flow": dict(flow.status(), cabin_ready=getattr(house, "CabinReady", False),
+                     bathroom_exit_ready=getattr(house, "BathroomExitReady", False)),
         "rooms": [{"id": room, "name": label,
                    "state": getattr(house, f"{room}_state", "UNKNOWN")}
                   for room, label in ROOM_STATES],
@@ -274,7 +282,7 @@ def status_snapshot():
         "buttons": [{"value": rsm.get_button_value(f"BTN{i}"),
                      "status": rsm.device_status(f"BTN{i}")} for i in range(1, 7)],
         "dropdown_button": {"value": dropdown_value, "status": dropdown_status},
-        "pirs": [rsm.get_pir_state(f"PIR{i}") for i in range(1, 7)],
+        "pirs": [rsm.get_pir_state(f"PIR{i}") for i in range(1, 8)],
         "servos": {i: rsm.get_servo_state(i) for i in ("DROPDOWN1", "SERVO1", "SERVO2")},
         "lanterns": {f"LANTERN{i}": rsm.get_lantern_state(f"LANTERN{i}") for i in range(1, 5)},
         "health": rsm.healthy(), "failure": rsm.command_failure(),

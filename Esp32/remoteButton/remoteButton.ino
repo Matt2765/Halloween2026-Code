@@ -1,6 +1,6 @@
 #include <HauntButtons.h>
 // ===== PER-FLASH DEVICE CONFIGURATION =====
-const char* DEVICE_ID = "BTN1";
+const char* DEVICE_ID = "BTN2";
 constexpr int BUTTON_PINS[] = {32}; // Each button connects GPIO to GND.
 const uint8_t BUTTON_IDS[] = {1}; // Python uses one-based numbering.
 constexpr uint32_t DEBOUNCE_MS = 30, HELD_REPORT_MS = 2000;

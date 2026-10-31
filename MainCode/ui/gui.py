@@ -141,12 +141,12 @@ def MainGUI():
         lbl.grid(row=i, column=1, sticky="w")
         btn_labels[sid] = lbl
 
-    # PIR table: six nodes in their own sensors column.
+    # PIR table: seven nodes in their own sensors column.
     pir_frame = tk.Frame(row1, bg="orange")
     pir_frame.grid(row=0, column=2, sticky="nw", padx=(10, 0))
     tk.Label(pir_frame, text="PIR", font=small, bg="orange").grid(
         row=0, column=0, columnspan=2, sticky="w")
-    pir_ids = [f"PIR{i}" for i in range(1, 7)]
+    pir_ids = [f"PIR{i}" for i in range(1, 8)]
     pir_labels = {}
     for i, sid in enumerate(pir_ids, start=1):
         tk.Label(pir_frame, text=sid, font=small, bg="orange").grid(

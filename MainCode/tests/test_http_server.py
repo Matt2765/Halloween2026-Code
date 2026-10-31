@@ -84,6 +84,14 @@ class HTTPServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), expected)
 
+    def test_audio_diagnostics_endpoint_is_read_only(self):
+        expected={"secondary":{"device":15,"wasapi_exclusive":False,"callback_count":123}}
+        module=SimpleNamespace(audio_diagnostics=lambda:expected)
+        with patch.dict(sys.modules,{"control.audio_manager":module}):
+            status, body=self.get("/api/audio")
+        self.assertEqual(status,200)
+        self.assertEqual(json.loads(body),expected)
+
     def test_test_catalog_and_post_validation(self):
         module = ModuleType("control.web_tests")
         module.catalog = lambda: {"relays": [{"id": "cabin_strobe"}]}
@@ -126,13 +134,14 @@ class HTTPServerTests(unittest.TestCase):
             get_value=lambda *args: None,
             device_status=lambda sid: dropdown["status"] if sid == "DROPDOWN1" else {},
             get_button_value=lambda sid: dropdown["value"] if sid == "DROPDOWN1" else None,
-            get_pir_state=lambda *args: {},
+            get_pir_state=lambda sid: {"id": sid},
             get_servo_state=lambda *args: {}, get_lantern_state=lambda *args: {},
             healthy=lambda: {}, command_failure=lambda: None,
         )
         control = ModuleType("control")
         control.remote_sensor_monitor = rsm
         modules = {
+            "control.group_flow": SimpleNamespace(flow=SimpleNamespace(status=lambda: {})),
             "control": control,
             "control.doors": SimpleNamespace(DOOR_SOLENOID_PINS={}, DOOR_SENSOR_IDS={},
                                               DOOR_SENSOR_BYPASS={}),
@@ -143,6 +152,9 @@ class HTTPServerTests(unittest.TestCase):
             status, body = self.get("/api/status")
             self.assertEqual(status, 200)
             data = json.loads(body)
+            self.assertEqual([entry["id"] for entry in data["pirs"]], [f"PIR{i}" for i in range(1,8)])
+            self.assertEqual(len(data["tofs"]),6)
+            self.assertEqual(len(data["buttons"]),6)
             self.assertEqual(data["animatronics"], {"pedro":{"mode":"manual"}, "george":{"mode":"off"}})
             states = {r["id"]: r["state"] for r in data["rooms"]}
             self.assertEqual(len(states), 7)

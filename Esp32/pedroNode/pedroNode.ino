@@ -3,6 +3,10 @@
 using namespace haunt;
 // ===== PER-FLASH DEVICE CONFIGURATION =====
 const char* DEVICE_ID = "PEDRO1";
+#ifndef PEDRO_WINGS_ENABLED
+#define PEDRO_WINGS_ENABLED 0 // Broken servo; set to 1 after replacement.
+#endif
+constexpr bool WINGS_ENABLED = PEDRO_WINGS_ENABLED != 0;
 constexpr int WINGS_PIN=23, BEAK_PIN=18, NECK_PIN=5, EYES_PIN=4;
 constexpr int GREEN_LED_PIN=2, RED_LED_PIN=15;
 constexpr bool NECK_ACTIVE_HIGH=true, EYES_ACTIVE_HIGH=true, LED_ACTIVE_HIGH=true;
@@ -28,7 +32,9 @@ void servoOutput(ledc_channel_t channel,const Ramp& ramp) {
   ledc_update_duty(LEDC_HIGH_SPEED_MODE,channel);
 }
 void output() {
-  servoOutput(LEDC_CHANNEL_0,wings); servoOutput(LEDC_CHANNEL_1,beak);
+  if(WINGS_ENABLED) servoOutput(LEDC_CHANNEL_0,wings);
+  else digitalWrite(WINGS_PIN,LOW);
+  servoOutput(LEDC_CHANNEL_1,beak);
   digitalOutput(NECK_PIN,neck,NECK_ACTIVE_HIGH); digitalOutput(EYES_PIN,eyes,EYES_ACTIVE_HIGH);
 }
 void park(uint32_t now) {
@@ -60,7 +66,7 @@ Code command(const Received& r) {
   state=PedroState(requestedState); controllerConnected=true; lastController=now;
   if(state==OFF) park(now);
   else {
-    if(wings.target!=angleToUs(wingAngle) || !wings.moving()) wings.move(angleToUs(wingAngle),duration,now); if(beak.target!=angleToUs(beakAngle) || !beak.moving()) beak.move(angleToUs(beakAngle),duration,now);
+    if(WINGS_ENABLED && (wings.target!=angleToUs(wingAngle) || !wings.moving())) wings.move(angleToUs(wingAngle),duration,now); if(beak.target!=angleToUs(beakAngle) || !beak.moving()) beak.move(angleToUs(beakAngle),duration,now);
     neck=p.payload[15]; eyes=p.payload[16]; output();
   }
   commandSession=p.session; commandSequence=p.seq; leds(now); report(); return ACCEPTED;
@@ -73,12 +79,13 @@ bool setupServo(int pin,ledc_channel_t channelNumber) {
 }
 void setup() {
   pinMode(NECK_PIN,OUTPUT); pinMode(EYES_PIN,OUTPUT); pinMode(GREEN_LED_PIN,OUTPUT); pinMode(RED_LED_PIN,OUTPUT);
+  if(!WINGS_ENABLED) { digitalWrite(WINGS_PIN,LOW); pinMode(WINGS_PIN,OUTPUT); }
   neck=eyes=false; leds(millis());
   digitalOutput(NECK_PIN,false,NECK_ACTIVE_HIGH); digitalOutput(EYES_PIN,false,EYES_ACTIVE_HIGH);
   ledc_timer_config_t timer{};
   timer.speed_mode=LEDC_HIGH_SPEED_MODE; timer.timer_num=LEDC_TIMER_0;
   timer.duty_resolution=LEDC_TIMER_16_BIT; timer.freq_hz=50; timer.clk_cfg=LEDC_AUTO_CLK;
-  if(ledc_timer_config(&timer)!=ESP_OK || !setupServo(WINGS_PIN,LEDC_CHANNEL_0) || !setupServo(BEAK_PIN,LEDC_CHANNEL_1)) {
+  if(ledc_timer_config(&timer)!=ESP_OK || (WINGS_ENABLED && !setupServo(WINGS_PIN,LEDC_CHANNEL_0)) || !setupServo(BEAK_PIN,LEDC_CHANNEL_1)) {
     delay(1000); ESP.restart(); return;
   }
   park(millis());

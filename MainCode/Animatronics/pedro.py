@@ -20,6 +20,7 @@ from Animatronics.core import AnimatronicController, AnimatronicShow
 
 ASSETS = Path(__file__).resolve().parents[3] / "Assets"
 BEAK_TIMES = (0.2, 0.2, 0.1, 0.1, 0.4, 0.3)
+WINGS_ENABLED = False  # Broken servo: re-enable after replacement.
 WINGS_REST, WINGS_OPEN = 5, 115
 BEAK_CLOSED, BEAK_OPEN = 55, 10
 EYES_ON_SECONDS = (3.0, 7.0)
@@ -43,7 +44,7 @@ class Motion:
         if state == "off":
             self.reset(now)
             return dict(state=state, wings=WINGS_REST, beak=BEAK_CLOSED, neck=False, eyes=False)
-        if now >= self.next_wings:
+        if WINGS_ENABLED and now >= self.next_wings:
             self.wings = WINGS_OPEN if self.wings == WINGS_REST else WINGS_REST
             self.next_wings = now + self.rng.randint(1, 6)
         if now >= self.next_neck:
@@ -72,7 +73,9 @@ class PedroController(AnimatronicController):
     speech_min_open, speech_max_open, speech_min_closed = 0.08, 0.18, 0.09
     speech_open_ratio, speech_close_ratio = 0.24, 0.16
     motion_factory = Motion
-    output_limits = dict(wings=(5, 115), beak=(10, 55), neck=bool, eyes=bool)
+    output_limits = dict(beak=(10, 55), neck=bool, eyes=bool)
+    if WINGS_ENABLED:
+        output_limits["wings"] = (5, 115)
     rest_pose = dict(wings=WINGS_REST, beak=BEAK_CLOSED, neck=False, eyes=False)
 
     def __init__(self, device_id="PEDRO1", **kwargs):

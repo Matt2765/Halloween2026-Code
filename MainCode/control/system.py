@@ -11,6 +11,7 @@ from control.shutdown import shutdownDetector
 from control.doors import setDoorState
 from control.houseLights import toggleHouseLights
 from control import remote_sensor_monitor
+from control.group_flow import flow
 from ui.gui import MainGUI
 from ui.http_server import HTTP_SERVER
 from utils.tools import log_event, BreakCheck, wait, randMixedNum
@@ -78,6 +79,7 @@ def StartHouse():
         play_audio("starting house", gain=0.1)
         log_event("[System] Launching main sequence...")
         house.HouseActive = True
+        flow.reset()
 
         setDoorState(1, "CLOSED")
         setDoorState(2, "CLOSED")
@@ -87,6 +89,8 @@ def StartHouse():
         t.sleep(1)
         toggleHouseLights(False)
         setDoorState(5, "OPEN")
+
+        play_audio("secondary_FR", "graveyardMusic.wav", gain=1)
 
         #start_pedro(gain=1)
 

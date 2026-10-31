@@ -2,7 +2,7 @@ import time as t
 from context import house
 from control.audio_manager import play_audio
 from control.arduino import m1Digital_Write
-from control.doors import setDoorState
+from control.doors import setDoorState, DOOR_SENSOR_IDS
 from utils.tools import BreakCheck, log_event, wait, randMixedNum
 from control import remote_sensor_monitor as rsm
 from control.houseLights import toggleHouseLights
@@ -10,6 +10,8 @@ from control import dimmer_controller as dim
 import threading
 import random
 from control import animatronic_service
+from control.group_flow import flow, BASEMENT_EXIT_MIN_SECONDS
+from control.room_sequence import sequence_wait, SequenceStopped
 
 _ambient_workers = {}
 _ambient_lock = threading.RLock()
@@ -56,6 +58,7 @@ def startAmbientFlicker(channel, ramp_seconds=0.0):
 # threading.Thread(target=function_name, daemon=True, name="Basement effect").start()
 
 def run():
+    wait = sequence_wait
     log_event("[Basement] Starting...")
 
     effect_stop = threading.Event()
@@ -63,6 +66,7 @@ def run():
     try:
         # Room startup here
         house.Basement_state = "STANDBY"
+        flow.basement_ready()
         global spotThread
         global spotState
         global ambientLight
@@ -72,10 +76,20 @@ def run():
                 break
 
             # Sequencing here
-            while house.Basement_state != "ACTIVE":
-                if house.Demo or not house.HouseActive:
+            group = None
+            while group is None:
+                if BreakCheck():
+                    return
+                if house.Demo:
                     break
-                wait(1)  # 1 second polling interval until ACTIVE
+                group = flow.take_basement_arrival()
+                if group is None:
+                    wait(.05)
+
+            if BreakCheck():
+                return
+            house.Basement_state = "ACTIVE"
+            log_event(f"[Basement] Starting group {group}")
 
             basementMusic = play_audio("Basement", "ES_Crypta - Jo Wandrini.wav", gain=1, looping=True)
 
@@ -90,6 +104,7 @@ def run():
             wait(5)
 
             file = 0
+            loops = 0
             looping = True
 
             while True:
@@ -104,15 +119,21 @@ def run():
                             ]
                 
                 play_audio("Basement", vo_files[file], threaded=False, gain=1)
+                loops += 1
                 if file < 4:
                     file += 1
+                else:
+                    break
+
+                '''if loops > 6:
+                    break'''
 
                 for i in range(10):
                     distance = rsm.get_TOF_value("TOF1")
                     if distance is not None and distance <= 90:
                         looping = False
                         break
-                    t.sleep(.1)
+                    wait(.1)
                     if BreakCheck():
                         break
                 if not looping or BreakCheck():
@@ -167,7 +188,7 @@ def run():
 
             threading.Thread(target=awakenGeorge, daemon=True).start()
 
-            t.sleep(.5)
+            wait(.5)
 
             stopAmbientFlicker(7)
 
@@ -192,14 +213,31 @@ def run():
             m1Digital_Write(37, 0) #strobe
 
             setDoorState(6, "CLOPEN")
+            flow.start_exit()
+            exit_started = t.monotonic()
 
             dim.dim(22, channel=4) #dynamic hallway green
 
-            wait(15)  # 55.1s elapsed
+            m1Digital_Write(9, 0) #blacklight
 
+            # Require an exit crossing, then ten continuous seconds clear.
+            # Keep the exit lighting for at least 15 seconds as well.
+            while True:
+                connected = rsm.healthy()["connected"]
+                exit_pir = rsm.get_pir_state(DOOR_SENSOR_IDS[6])["triggered"] if connected else None
+                forest_pir = rsm.get_pir_state("PIR7")["triggered"] if connected else None
+                exit_clear = flow.update_exit(t.monotonic(), exit_pir, forest_pir)
+                lighting_finished = t.monotonic() - exit_started >= BASEMENT_EXIT_MIN_SECONDS
+                if lighting_finished and exit_clear and house.DoorState.get(6) == "CLOSED":
+                    break
+                wait(.05)
+
+            log_event(f"[Basement] Group cleared; Forest PIR seen: {flow.status()['forest_seen']}")
             dim.dim(0, channel=4) #dynamic hallway green
 
             m1Digital_Write(37, 1) #strobe
+
+            m1Digital_Write(9, 1) #blacklight
 
             effect_stop.set()
             stopAmbientFlicker()
@@ -209,6 +247,8 @@ def run():
             house.Basement_state = "STANDBY"
 
             m1Digital_Write(49, 1)
+            flow.basement_ready()
+            log_event("[Basement] Ready for the next group")
 
             if BreakCheck() or house.Demo:
                 if house.Demo:
@@ -217,8 +257,11 @@ def run():
                     toggleHouseLights(True)
                 break
 
-            t.sleep(0.1)
+            wait(0.1)
+    except SequenceStopped:
+        pass
     finally:
+        flow.stop()
         spotThread = False
         ambientLight = False
         effect_stop.set()
@@ -321,7 +364,7 @@ def awakenGeorge():
         for _ in range(80):
             if movement_stop.is_set() or BreakCheck():
                 return
-            animatronic_service.george.neck(random.randint(0, 115))
+            animatronic_service.george.neck(random.randint(80, 180))
             if movement_stop.wait(randMixedNum(.5, 2)):
                 return
 
@@ -359,7 +402,7 @@ def awakenGeorge():
         return
     george = animatronic_service.george
     try:
-        if not george.start_idle():
+        if not george.start_idle(neck_min=80, neck_max=180):
             return
         if not george.talk(channel="Basement"):
             return

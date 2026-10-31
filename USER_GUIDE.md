@@ -1002,3 +1002,23 @@ worker as idle, so neither overwrites the other. `talk(gain=None)` uses the
 configured audio route's gain; gain values must be finite and nonnegative and
 may exceed 1 for amplification. Start idle / Stop idle are available in
 **Test > Animatronics**. Restart MainCode and refresh the page; no reflash needed.
+
+
+### CUBILUX secondary output buffering
+
+The secondary WASAPI stream defaults to shared mode with driver-selected audio
+blocks and 120 ms requested output latency. These are configurable at the top
+of `control/audio_manager.py` via SECONDARY_WASAPI_EXCLUSIVE,
+SECONDARY_BLOCKSIZE and SECONDARY_LATENCY. Restart MainCode after changing them.
+The configured secondary device must still match CUBILUX. A six-channel endpoint
+keeps valid routes such as secondary_FR (index 1), secondary_SL (index 4), and
+secondary_SR (index 5). Unavailable back routes (indexes 6/7) are logged at startup
+and rejected if requested, rather than forcing every route into stereo fallback.
+To use indexes 6/7, configure Windows/the device for eight-channel (7.1) output.
+
+For playback diagnostics open `http://localhost:9999/api/audio` while MainCode
+runs. Each mixer reports its actual endpoint, active state, exclusive/shared
+mode, callback count, callback underruns and source-buffer underruns. This is a
+read-only endpoint and does not play or initialize audio. An increasing callback
+underrun count indicates output scheduling/buffering trouble; source underruns
+indicate the file reader is not keeping the mixer supplied.

@@ -2,7 +2,7 @@
 #include <esp_system.h>
 using namespace haunt;
 // ===== PER-FLASH DEVICE CONFIGURATION =====
-const char* DEVICE_ID = "PIR4";
+const char* DEVICE_ID = "PIR7";
 constexpr int PIR_PIN = 13; // HC-SR501 OUT; common ground, module VCC from 5V
 constexpr uint32_t WARMUP_MS = 60000, STATUS_MS = 2000;
 constexpr bool SERIAL_DEBUG = true; // USB diagnostics only; independent of Python DEBUG_INFO.

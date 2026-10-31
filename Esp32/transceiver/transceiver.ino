@@ -85,6 +85,26 @@ void delivery(const Packet& p,Code code,uint32_t rtt) {
     resultLine(request.cid,p.dst,codeName(code),reason(code),p.seq,rtt,code==ACCEPTED||code==INVALID||code==WRONG_SESSION); request.used=false; return;
   }
 }
+void rejected(const Received& r,Code code) {
+  auto peer=radio.registry.find(r.packet.src);
+  if(!peer) return;
+  // Bounded, per-peer reporting; never flood USB with repeated rejections.
+  static uint32_t last[MAX_DEVICES]={};
+  static bool reported[MAX_DEVICES]={};
+  int slot=int(peer-radio.registry.peers); uint32_t now=millis();
+  if(reported[slot] && now-last[slot]<1000) return;
+  reported[slot]=true; last[slot]=now;
+  StaticJsonDocument<512> doc;
+  doc["type"]="diagnostic"; doc["id"]=r.packet.src;
+  doc["error"]=code==CONFLICT?"id_conflict":code==WRONG_SESSION?"old_session":"old_sequence";
+  char observed[18],expected[18];
+  snprintf(observed,sizeof(observed),"%02X:%02X:%02X:%02X:%02X:%02X",r.mac[0],r.mac[1],r.mac[2],r.mac[3],r.mac[4],r.mac[5]);
+  snprintf(expected,sizeof(expected),"%02X:%02X:%02X:%02X:%02X:%02X",peer->mac[0],peer->mac[1],peer->mac[2],peer->mac[3],peer->mac[4],peer->mac[5]);
+  doc["observed_mac"]=observed; doc["expected_mac"]=expected;
+  doc["session"]=r.packet.session; doc["expected_session"]=peer->session;
+  doc["seq"]=r.packet.seq; doc["expected_seq"]=peer->seq[stream(r.packet)];
+  queueLine(doc,false,slot);
+}
 Code received(const Received& r) {
   const Packet& p=r.packet;
   auto peer=radio.registry.find(p.src);
@@ -92,9 +112,7 @@ Code received(const Received& r) {
   int slot=int(peer-radio.registry.peers);
   if(peer->conflict) {
     radio.cancel(p.src,CONFLICT);
-    StaticJsonDocument<256> doc;
-    doc["type"]="diagnostic"; doc["id"]=p.src; doc["error"]="id_conflict";
-    queueLine(doc,false,slot); return CONFLICT;
+    return CONFLICT;
   }
   if(p.type==COMMAND) return INVALID;
   StaticJsonDocument<1024> doc;
@@ -272,6 +290,7 @@ void setup() {
   critical=new(std::nothrow) Line[80]; periodic=new(std::nothrow) Line[65];
   if(!critical||!periodic) { delay(1000); ESP.restart(); }
   if(!radio.begin(BRIDGE_ID,received,delivery)) { delay(1000); ESP.restart(); }
+  radio.onRejection(rejected);
   heartbeat();
 }
 void loop() {

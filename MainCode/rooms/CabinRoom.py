@@ -9,8 +9,9 @@ from control.lightning import bulb_lightning
 from control.houseLights import toggleHouseLights
 import threading
 import random
-from control.dimmer_controller import dim, start_glow
+from control.dimmer_controller import dim, start_glow, dimmer_flicker, stop_flicker
 from control import animatronic_service
+from control.room_sequence import sequence_wait, SequenceStopped
 
 wallLanterns = False
 
@@ -24,6 +25,7 @@ wallLanterns = False
 # threading.Thread(target=function_name, daemon=True, name="CabinRoom effect").start()
 
 def run():
+    wait = sequence_wait
     global wallLanterns
     log_event("[CabinRoom] Starting...")
     effect_stop = threading.Event()
@@ -40,13 +42,20 @@ def run():
 
             # Sequencing here
             house.CabinRoom_state = "ACTIVE"
+            house.CabinReady = False
+
+            #start dim1 flicker
+            dim(20, channel=1)
+            ambient_flicker = dimmer_flicker(
+                float("inf"), 19, 21, .08, .2, threaded=True, channel=1)
+            effect_threads.append(ambient_flicker)
 
             '''count = 0
             while not rsm.get_button_value("BTN2"):
                 if count > 3:
                     continue
                 count += 0.05
-                t.sleep(.05)
+                wait(.05)
                 if BreakCheck():
                     return'''
 
@@ -67,26 +76,44 @@ def run():
 
             wait(10)
 
+            next_quip = t.monotonic()
             while(
                 not house.Bathroom_state == "STANDBY" 
                 or house.DoorState[3] == "OPEN" 
                 or house.DoorState[4] == "OPEN"
             ):
-                if BreakCheck() or house.Demo:
+                if BreakCheck():
+                    return
+                if house.Demo:
                     break
-                animatronic_service.pedro.talk(channel="CabinRoom_Wall", gain=2)
-                wait(20)
+                if t.monotonic() >= next_quip and not animatronic_service.pedro.status()["running"]:
+                    animatronic_service.pedro.talk(channel="CabinRoom_Wall", gain=2)
+                    next_quip = t.monotonic() + 20
+                wait(.05)
 
-            wait(1)
+            wait(.05)
 
             rsm.led("BTN1", True)
+            house.CabinReady = True
             log_event("cabin room ready for btn press")
 
             while not rsm.get_button_value("BTN1"):
                 if BreakCheck():
-                    break
-                t.sleep(.1)
+                    return
+                wait(.1)
 
+            if BreakCheck():
+                return
+            house.CabinReady = False
+            # Cancel Pedro's voice before the scare audio starts; keep his idle.
+            if not animatronic_service.pedro.stop_talking():
+                log_event("[CabinRoom] Pedro speech has not stopped; holding the intro")
+                return
+
+            #end dim1 flicker
+            stop_flicker(join=True, channel=1)
+            ambient_flicker.join()
+            dim(0, channel=1)
             rsm.led("BTN1", False)
 
             if cabinMusic1 is not None:
@@ -98,6 +125,8 @@ def run():
             play_audio("CabinRoom_Wall", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.4)
             play_audio("CabinRoom_PA", "cabinRoomIntrov10-NOTHUNDER.wav", gain=.4)
             setDoorState(2, "OPEN")
+            # Grandma's route into Shower Hallway during the Cabin scare.
+            # Bathroom is clear here; the new group is still in Cabin.
             setDoorState(4, "OPEN")
 
             wait(6)  # 9s elapsed
@@ -106,7 +135,7 @@ def run():
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,5))
             play_audio("CabinRoom_Wall", "thunder1.wav", gain=.5)
             play_audio("CabinRoom_PA", "thunder1.wav", gain=.5)
-            t.sleep(.5)
+            wait(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
             blast_stop = threading.Event()
@@ -133,7 +162,7 @@ def run():
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,5))
             play_audio("CabinRoom_Wall", "thunder2.wav", gain=.5)
             play_audio("CabinRoom_PA", "thunder2.wav", gain=.5)
-            t.sleep(.5)
+            wait(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
             wait(4)  # 24s elapsed
@@ -145,7 +174,7 @@ def run():
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,5))
             play_audio("CabinRoom_Wall", "thunder3.wav", gain=.5)
             play_audio("CabinRoom_PA", "thunder3.wav", gain=.5)
-            t.sleep(.5)
+            wait(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
             wait(12.5)  # 35.5s elapsed
@@ -169,7 +198,7 @@ def run():
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,6))
             play_audio("CabinRoom_Wall", "ES_Lightning Bolt 7 - SFX Producer.wav", gain=.5)
             play_audio("CabinRoom_PA", "thunder4.wav", gain=.5)
-            t.sleep(1.3)
+            wait(1.3)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
             wait(4)  # 45.5s elapsed
@@ -177,7 +206,7 @@ def run():
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,6))
             play_audio("CabinRoom_Wall", "ES_Lightning Bolt 4 - SFX Producer.wav", gain=.5)
             play_audio("CabinRoom_PA", "ES_Lightning Bolt 4 - SFX Producer.wav", gain=.5)
-            t.sleep(.5)
+            wait(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1)
 
             setDoorState(2, "OPEN")
@@ -187,7 +216,7 @@ def run():
             bulb_lightning(pin=28, flash_ms=200, delay_ms=80, flashes=range(2,6))
             play_audio("CabinRoom_Wall", "thunder2.wav", gain=.5)
             play_audio("CabinRoom_PA", "thunder2.wav", gain=.5)
-            t.sleep(.5)
+            wait(.5)
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=.5)
             play_audio("primary_LFE", "thunder2.wav", gain=.5)
 
@@ -211,7 +240,7 @@ def run():
 
             m1Digital_Write(22, 0) #strobe off
 
-            wait(15)
+            #wait(15)
 
             for thread in effect_threads:
                 thread.join()
@@ -224,12 +253,17 @@ def run():
                     toggleHouseLights(True)
                 break
 
-            t.sleep(0.1)
+            wait(0.1)
+    except SequenceStopped:
+        pass
     finally:
+        house.CabinReady = False
+        stop_flicker(join=True, channel=1)
         wallLanterns = False
         effect_stop.set()
         for thread in effect_threads:
             thread.join()
+        dim(0, channel=1)
         dim(0, channel=2)
         m1Digital_Write(26, 1)
         m1Digital_Write(24, 1)

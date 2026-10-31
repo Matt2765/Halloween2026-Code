@@ -38,8 +38,9 @@ strapping pins. GPIO4/5 avoid those functions. See
 * Hold three seconds: exits sync, gives two slow flashes (400 ms on/off), then
   continues indefinite normal flickering. Release does not trigger another reset.
 * Another short press starts again at cue 1, even during a fade or feedback.
-* A synced lantern accepts only its next numbered cue, then advances by one.
-  Explicit device selection obeys the same rule. State changes interrupt the
+* A synced lantern accepts its next numbered cue or a newer cue in the same
+  sync generation, then waits for the accepted cue plus one. Older/duplicate
+  cues are rejected. State changes interrupt the
   previous effect; feedback briefly overlays the commanded light output.
 * Normal flickering stays between 170 and 255 before the brightness limit.
   Intense flickering uses 12..255 with faster variations. Fade-out variants
@@ -56,8 +57,9 @@ strapping pins. GPIO4/5 avoid those functions. See
 * `strobe` alternates bright flashes (200..255) with fully dark gaps. Randomized
   30..70 ms on-times and 50..140 ms off-times give it an erratic flicker feel.
   It starts immediately and continues until another cue or a sync-button reset.
-* Link loss preserves the current effect and sequence. There is no offline
-  command buffering or catch-up. Reboot returns to indefinite flickering.
+* Link loss preserves the current effect and sequence. The next house cue can
+  bring a latched lantern forward without replaying missed effects. There is
+  no offline command buffering. Reboot returns to unsynced indefinite flickering.
 
 ## Room calls through RSM
 
@@ -73,7 +75,7 @@ deliveries = RSM.lantern(2, "flicker_out", lantern_ids="LANTERN1")
 # Several specific lanterns:
 deliveries = RSM.lantern(3, "solid_on", lantern_ids=["LANTERN1", "LANTERN2"])
 
-# A jumpscare strobe for all synced lanterns waiting for cue 4:
+# A jumpscare strobe for the group whose intended next house cue is 4:
 deliveries = RSM.lantern(4, "strobe")
 
 for device_id, delivery_id in deliveries.items():
@@ -86,14 +88,21 @@ Allowed states: `off`, `solid_on`, `flickering_on`, `intense_flickering_on`,
 different from the UUID delivery IDs used by `command_status`. After the last
 possible cue, sync must be reset. An empty group returns `{}`.
 
-Group calls select eligible lanterns from current telemetry and fan out separate
-ACKed commands. They are not atomic or perfectly simultaneous. Wait until fresh
-telemetry shows `next_command_id` advanced before issuing the next group cue
-(reports every 500 ms and on transitions). A missed cue leaves that lantern
-behind: resend the missing cue explicitly after checking its state, or press
-sync and start that lantern's sequence again. An `unconfirmed` delivery may have
-executed; check telemetry rather than assuming failure. Do not automatically
-replay commands after a reconnect.
+Untargeted house cue 1 latches all fresh, synced lanterns waiting for 1 into
+that group's sequence. Python tracks intended progress separately from actual
+telemetry: if one lantern misses cue 7 or its ACK, the group's cue 8 still targets
+it. Firmware accepts that newer cue and immediately applies its current effect,
+without replaying cue 7. A missed effect can remain in place until the next cue;
+there is no additional host retry loop. The bridge retains its four radio attempts.
+An `unconfirmed` result is still reported honestly, not converted to success.
+The GUI's `wait N` remains the node's confirmed state.
+
+Multiple groups can be in different rooms. A later cue 1 only enrolls newly
+synced lanterns; it never pulls an existing group back to the start. Every
+re-sync or reboot detaches the old membership by generation/boot session. A
+re-sync waits for a new cue 1 even if the old group is midway through the house.
+Restarting MainCode clears memberships: sync lanterns again before starting.
+Separate ACKed fan-out commands are not atomic or perfectly simultaneous.
 
 During a room demo (`house.Demo`), Python group calls without `lantern_ids`
 send the requested effect to every available, synced lantern using each
@@ -101,7 +110,7 @@ lantern's reported next cue number. This lets a newly synced lantern follow
 Bathroom or another room without first receiving earlier rooms' cues. Explicit
 device targets keep the supplied cue number. Normal full-house sequences keep
 their original cue numbers. Sync-button requirements and firmware sequence
-checks still apply; there is no replay or catch-up of missed effects.
+checks still apply; past effects are never replayed.
 
 Pressing sync increments a generation in the node. Commands carry the generation
 observed by RSM as well as the persistent boot session, so delayed commands from
@@ -113,9 +122,9 @@ unavailable/conflict. Brightness is generated PWM, not measured lamp output.
 
 ## Flash and bench checks
 
-Rebuild and flash the **bridge** and four lanterns with this shared library.
-Existing nodes need no protocol-setting change: the new type and command are
-additive, and old 11-byte commands remain unchanged.
+For the group-latching update, restart MainCode and reflash every lantern that
+will participate. The bridge wire format is unchanged, so an already-current
+bridge needs no reflash for this update. Preserve each board's unique DEVICE_ID.
 
 ```powershell
 arduino-cli compile --fqbn esp32:esp32:esp32c3 --libraries Esp32/libraries Esp32/lanternNode
@@ -123,7 +132,8 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --libraries Esp32/libraries Esp32/t
 ```
 
 On each board, verify boot flicker; short press feedback and wait 1; refusal of
-cue 2 before cue 1; acceptance/advancement of each state; both fades ending off;
+old-generation and duplicate cues; forward jumps after a lost cue;
+acceptance/advancement of each state; both fades ending off;
 mid-effect reset; long-hold feedback and ignored commands; another short press;
 off-to-flicker ramps, immediate already-lit changes, irregular strobing, and
 four-lantern fan-out. Test reset while a command is in flight, USB disconnect,

@@ -95,8 +95,10 @@ struct PeerState {
   char id[16]={}; uint8_t mac[6]={}; uint32_t session=0, heard=0;
   bool conflict=false, initialized[STREAM_COUNT]={}, seen=false,continuous=false;
   uint32_t seq[STREAM_COUNT]={}, gaps=0,lastSeen=0;
+  uint32_t lastConflict=0;
 };
-// Lifetime registry: fail closed at capacity; do not evict ordering/conflict evidence.
+constexpr uint32_t CONFLICT_QUIET_MS=10000;
+// Keep identity and ordering evidence. Only the original MAC can recover.
 struct Registry {
   PeerState peers[MAX_DEVICES];
   PeerState* find(const char* id) { for(auto& e:peers) if(!strcmp(e.id,id)) return &e; return nullptr; }
@@ -104,8 +106,14 @@ struct Registry {
     e=find(p.src);
     if(!e) for(auto& slot:peers) if(!slot.id[0]) { e=&slot; strcpy(e->id,p.src); memcpy(e->mac,mac,6); e->session=p.session; break; }
     if(!e) return QUEUE_FULL;
-    if(memcmp(e->mac,mac,6)) e->conflict=true;
-    if(e->conflict) return CONFLICT;
+    if(memcmp(e->mac,mac,6)) { e->conflict=true; e->lastConflict=now; }
+    if(e->conflict) {
+      // Commands/ACKs and old telemetry cannot unlock a quarantined identity.
+      if(memcmp(e->mac,mac,6) || now-e->lastConflict<CONFLICT_QUIET_MS ||
+         p.type==COMMAND || p.type==ACK || p.type==DIAGNOSTIC ||
+         (p.session==e->session ? order(p,*e)!=ACCEPTED : !newer(p.session,e->session))) return CONFLICT;
+      e->conflict=false;
+    }
     if(e->session!=p.session) {
       if(!newer(p.session,e->session)) return WRONG_SESSION;
       e->session=p.session; memset(e->initialized,0,sizeof(e->initialized));

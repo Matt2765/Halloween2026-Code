@@ -9,6 +9,8 @@ from control import remote_sensor_monitor as rsm
 from control.houseLights import toggleHouseLights
 import threading
 import random
+from control.group_flow import flow
+from control.room_sequence import sequence_wait, SequenceStopped
 
 # m1Digital_Write(33, 0)
 # setDoorState(1, "OPEN")           # "CLOSED" / "CLOPEN" also supported
@@ -20,6 +22,7 @@ import random
 # threading.Thread(target=function_name, daemon=True, name="Bathroom effect").start()
 
 def run():
+    wait = sequence_wait
     global ambientLight
     log_event("[Bathroom] Starting...")
 
@@ -41,11 +44,17 @@ def run():
                 if house.HouseActive:
                     wait(1)  # 1 second polling interval until Cabin Room is STANDBY
                 else:
-                    break
+                    return
+
+            if BreakCheck():
+                return
 
             house.Bathroom_state = "ACTIVE"
+            house.BathroomExitReady = False
+            basement_reserved = False
+            setDoorState(4, "CLOSED")
 
-            m1Digital_Write(30, 1) #blacklight
+            m1Digital_Write(34, 1) #blacklight
             
             play_audio("Bathroom", "bathroomMusicPT1.wav", gain=.6)
 
@@ -55,10 +64,15 @@ def run():
 
             wait(23)  # 20s elapsed
             
-            dim(0, channel=5) #dynamic hallway orange
+            #dim(0, channel=5) #dynamic hallway orange
 
             setDoorState(3, "CLOSED")
-            setDoorState(4, "OPEN")
+            basement_reserved = house.Demo or flow.reserve_basement()
+            if basement_reserved:
+                setDoorState(4, "OPEN")
+            else:
+                setDoorState(4, "CLOSED")
+                log_event("[Bathroom] Holding Door 4: previous group is still in Basement")
 
             wait(23)  # 62s elapsed; voice over time
 
@@ -73,7 +87,7 @@ def run():
             #mirror reveal
             ambientLight = False
             m1Digital_Write(31, 1) #magic light
-            t.sleep(.08)
+            wait(.08)
             m1Digital_Write(33, 0) #mirror light
             play_audio("primary_LFE", "SUB-Lightning3.wav", gain=1, threaded=True)
 
@@ -81,7 +95,7 @@ def run():
 
             m1Digital_Write(35, 0) #strobe
 
-            t.sleep(.5)
+            wait(.5)
 
             ambientLight = True
             threading.Thread(target=ambientFlicker, daemon=True).start()
@@ -101,7 +115,7 @@ def run():
 
             m1Digital_Write(35, 0) #strobe
 
-            t.sleep(.5)
+            wait(.5)
 
             ambientLight = False
 
@@ -114,7 +128,7 @@ def run():
 
             play_audio("Bathroom", "bathroomMusicPT2.wav", gain=.8)
 
-            m1Digital_Write(30, 0) #blacklight
+            m1Digital_Write(34, 0) #blacklight
 
             log_event("waiting...")
 
@@ -123,19 +137,36 @@ def run():
 
             setDoorState(5, "OPEN")
 
-            house.Bathroom_state = "STANDBY"
+            dim(19, channel=5) #dynamic hallway orange
 
-            #dim(25, channel=5) #dynamic hallway orange
-
-            while rsm.get_pir_state("PIR3")["triggered"] is False: #door 4 sens
+            # Finish the scene, then hold here until Basement can take this group.
+            while not basement_reserved:
                 if BreakCheck():
-                    break
-                t.sleep(.5)
+                    return
+                basement_reserved = flow.reserve_basement()
+                wait(.05)
 
+            setDoorState(4, "OPEN")
+            while house.DoorState.get(4) != "OPEN":
+                wait(.05)
+            log_event("[Bathroom] Door 4 released for the next group")
+            house.BathroomExitReady = True
+
+            # Unknown sensor data must not count as a group crossing.
+            while rsm.get_pir_state("PIR3")["triggered"] is not True:
+                wait(.05)
+
+            if BreakCheck():
+                return
+            if not house.Demo and not flow.arrive():
+                return
+            house.BathroomExitReady = False
+
+            house.Bathroom_state = "STANDBY"
             setDoorState(4, "CLOPEN")
             rsm.lantern(7, "flicker_out")
 
-            house.Basement_state = "ACTIVE"
+            log_event("[Bathroom] Group handed to Dynamic Hallway / Basement")
 
             m1Digital_Write(35, 1) #strobe
 
@@ -146,11 +177,15 @@ def run():
                     toggleHouseLights(True)
                 break
 
-            t.sleep(0.1)
+            wait(0.1)
 
             while not house.CabinRoom_state == "ACTIVE":
-                wait(1)  # 1s polling interval until Cabin Room is ACTIVE
+                wait(.05)
+    except SequenceStopped:
+        pass
     finally:
+        house.BathroomExitReady = False
+        ambientLight = False
         house.Bathroom_state = "INACTIVE"
         log_event("[Bathroom] Exiting.")
 

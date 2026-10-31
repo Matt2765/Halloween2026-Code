@@ -114,6 +114,7 @@ void Radio::process(const Received& r) {
   if(millis()-r.rxMs>DELIVERY_LIFETIME_MS) { stats.drops++; return; }
   PeerState* peer=nullptr; Code code=registry.inspect(p,r.mac,millis(),peer);
   if(code!=ACCEPTED) {
+    if(rejection_) rejection_(r,code);
     if(code==CONFLICT) { stats.conflicts++; if(handler_) handler_(r); }
     if(code!=QUEUE_FULL) ack(p,code); return;
   }
@@ -138,7 +139,7 @@ void Radio::process(const Received& r) {
     stats.duplicates++; ack(p,ACCEPTED); return;
   }
   code=registry.order(p,*peer);
-  if(code!=ACCEPTED) { ack(p,code); return; }
+  if(code!=ACCEPTED) { if(rejection_) rejection_(r,code); ack(p,code); return; }
   if(p.type==COMMAND && get32(p.payload)!=session) code=WRONG_SESSION;
   else code=handler_?handler_(r):INVALID;
   if(code==QUEUE_FULL) return; // no receipt or successful ACK before queue acceptance

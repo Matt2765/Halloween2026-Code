@@ -87,18 +87,45 @@ class Animatronic:
                 self._controller.set_state("off")
             self._mode = "off"
 
-    def start_idle(self):
+    def stop_talking(self):
+        """Cancel this character's speech and close its mouth, preserving idle."""
+        with self._lock:
+            if self._show:
+                self._show.stop(park=False)
+                if self._show.thread and self._show.thread.is_alive():
+                    self._error = "Speech is still stopping"
+                    return False
+            if self._controller:
+                self._controller.set_state(self._finish_state())
+            self._mode = "idle" if self._idle_enabled else "off"
+            return True
+
+    def start_idle(self, *, neck_min=None, neck_max=None):
         """Enable persistent idle motion without starting audio or needing quips.
 
         During a quip only the body's idle setting changes; the mouth/audio
-        continue uninterrupted. Available for every animatronic.
+        continue uninterrupted. Optional neck_min/neck_max are servo degrees;
+        omitted endpoints use the character's normal idle range. Calling with
+        no limits restores that range. Limits also apply while talking.
         """
+        ranges = {}
+        if neck_min is not None or neck_max is not None:
+            defaults = getattr(self.controller_factory, "idle_neck_range", None)
+            if defaults is None:
+                raise ValueError(f"{self.name} does not have a servo neck idle range")
+            low = defaults[0] if neck_min is None else neck_min
+            high = defaults[1] if neck_max is None else neck_max
+            limit = self.controller_factory.output_limits["neck"]
+            if (type(low) is not int or type(high) is not int
+                    or not limit[0] <= low <= high <= limit[1]):
+                raise ValueError(f"Neck idle limits must be integer degrees with {limit[0]} <= neck_min <= neck_max <= {limit[1]}")
+            ranges["neck"] = (low, high)
         with self._lock:
             if not self._online():
                 return False
             controller = self._hardware()
             self._idle_enabled = True
-            controller.set_idle_motion(True)
+            controller.set_idle_motion(True, ranges=ranges)
             if not (self._show and self._show.running):
                 if self._show and self._show.thread and self._show.thread.is_alive():
                     self._error = "Show is still stopping"
@@ -185,7 +212,7 @@ class Animatronic:
             return True
 
     def neck(self, value, *, ramp_ms=0):
-        """George: servo degrees (0..115). Pedro: digital True/False."""
+        """George: servo degrees (0..180). Pedro: digital True/False."""
         return self.pose(neck=value, ramp_ms=ramp_ms)
 
     def eyes(self, on):

@@ -36,7 +36,12 @@ from utils.tools import log_event
 # devices.  Set these to the corresponding *output* device indexes.  Do not use
 # a microphone/input index: it has zero output channels.
 PRIMARY_DEVICE_INDEX: int | None = 16  # Primary multichannel output
-SECONDARY_DEVICE_INDEX: int | None = 4  # Secondary multichannel output
+SECONDARY_DEVICE_INDEX: int | None = 15  # Secondary multichannel output
+# CUBILUX: let Windows/PortAudio choose buffer sizes; fixed exclusive blocks
+# can stutter even when the endpoint accepts the format and opens successfully.
+SECONDARY_WASAPI_EXCLUSIVE = False
+SECONDARY_BLOCKSIZE = 0
+SECONDARY_LATENCY = 0.12
 
 # Optional device-name fragments protect against Windows reassigning indexes
 # after a USB/HDMI device is unplugged. None checks only output channel capacity.
@@ -108,23 +113,14 @@ primary_channels: ChannelMap = {
 
 # Secondary output channels.
 secondary_channels: ChannelMap = {
-    # Named ONKYO routes from the current wiring sheet. Generic aliases below
-    # remain available for diagnostics and existing callers.
-    "PalletHallway": {"index": 6, "gain": 1.0},  # Surround left
-    "ForestHallway": {"index": 2, "gain": 1.0},  # Center
-    "Pedro": {"index": 1, "gain": 1.0},  # Front right
-    "George": {"index": 1, "gain": 1.0},  # Default front right; independently routable
-    "Graveyard": {"index": 4, "gain": 1.0},  # Surround back left
     "secondary_FL": {"index": 0, "gain": 1.0},
     "secondary_FR": {"index": 1, "gain": 1.0},
     "secondary_C": {"index": 2, "gain": 1.0},
     "secondary_LFE": {"index": 3, "gain": 1.0},
-    "secondary_BL": {"index": 4, "gain": 1.0},
-    "secondary_BR": {"index": 5, "gain": 1.0},
-    "secondary_SL": {"index": 6, "gain": 1.0},
-    "secondary_SR": {"index": 7, "gain": 1.0},
-    # "stereo_secondary_pair": {"index": [0, 1], "gain": 1.0},
-    # Or use stereo_secondary_pair_L / stereo_secondary_pair_R entries.
+    "secondary_SL": {"index": 4, "gain": 1.0},
+    "secondary_SR": {"index": 5, "gain": 1.0},
+    "secondary_BL": {"index": 6, "gain": 1.0},
+    "secondary_BR": {"index": 7, "gain": 1.0},
 }
 
 DEFAULT_SOUND_DIR = (Path(__file__).resolve().parents[3] / "Assets" / "SoundDir").resolve()
@@ -415,20 +411,27 @@ class DeviceMixer:
         self.voices: list[_Voice] = []
         self.lock = threading.Lock()
         self.stream: Any | None = None
+        self.callback_count = 0
+        self.wasapi_exclusive = False
         self.callback_status_count = 0
         self.stream_underruns = 0
         self.peak_voices = 0
         self.clipped_samples = 0
 
     def start(self) -> None:
+        secondary_wasapi = self.kind == "secondary" and "wasapi" in self.hostapi.lower()
+        blocksize = SECONDARY_BLOCKSIZE if secondary_wasapi else MIX_BLOCKSIZE
+        latency = SECONDARY_LATENCY if secondary_wasapi else 0.06
+        exclusive = SECONDARY_WASAPI_EXCLUSIVE if secondary_wasapi else True
+
         def open_stream(extra_settings: Any | None) -> Any:
             return sd.OutputStream(
                 device=self.device_index,
                 samplerate=self.samplerate,
                 channels=self.channels,
                 dtype="float32",
-                blocksize=MIX_BLOCKSIZE,
-                latency=0.06,
+                blocksize=blocksize,
+                latency=latency,
                 callback=self._callback,
                 extra_settings=extra_settings,
             )
@@ -449,14 +452,15 @@ class DeviceMixer:
         extra = None
         if "wasapi" in self.hostapi.lower() and self.channels >= MULTICH_MIN_CHANNELS:
             try:
-                extra = sd.WasapiSettings(exclusive=True)
+                extra = sd.WasapiSettings(exclusive=exclusive)
             except Exception:
                 pass
         try:
             stream = start_stream(extra)
             self.stream = stream
+            self.wasapi_exclusive = bool(extra is not None and exclusive)
         except Exception as error:
-            if extra is None:
+            if extra is None or not exclusive:
                 raise
             log_event(f"[Audio] {self.kind} WASAPI exclusive failed; shared fallback: {error}")
             stream = start_stream(sd.WasapiSettings(exclusive=False))
@@ -464,7 +468,8 @@ class DeviceMixer:
         log_event(
             f"[Audio] {self.kind.upper()} persistent mixer opened "
             f"idx={self.device_index} '{self.device_name}', "
-            f"fs={self.samplerate}, ch={self.channels}"
+            f"fs={self.samplerate}, ch={self.channels}, "
+            f"exclusive={self.wasapi_exclusive}, blocksize={blocksize}, latency={latency}"
         )
 
     def add(self, voice: _Voice, *, routed_kind: DeviceKind | None = None) -> _Session:
@@ -540,6 +545,7 @@ class DeviceMixer:
 
     def _callback(self, output: FloatArray, frames: int, time_info: Any, status: Any) -> None:
         output.fill(0)
+        self.callback_count += 1
         if status:
             self.callback_status_count += 1
             self.stream_underruns += int(bool(getattr(status, "output_underflow", False)))
@@ -601,6 +607,9 @@ class DeviceMixer:
             "samplerate": self.samplerate,
             "active_voices": len(voices),
             "peak_voices": self.peak_voices,
+            "stream_active": bool(self.stream is not None and self.stream.active),
+            "wasapi_exclusive": self.wasapi_exclusive,
+            "callback_count": self.callback_count,
             "callback_statuses": self.callback_status_count,
             "callback_underruns": self.stream_underruns,
             "clipped_samples": self.clipped_samples,
@@ -664,16 +673,16 @@ def _fixed(kind: DeviceKind) -> tuple[int, int, int, str, str]:
     if channels <= 0:
         raise RuntimeError(f"Configured {kind} device {index} has no output channels")
     channel_map = primary_channels if kind == "primary" else secondary_channels
-    required_channels = max(
-        (channel for entry in channel_map.values()
-         for channel in ([entry["index"]] if isinstance(entry["index"], int) else entry["index"])),
-        default=-1,
-    ) + 1
-    if channels < required_channels:
-        raise RuntimeError(
-            f"Configured {kind} device idx={index} '{name}' has {channels} output channels; "
-            f"its channel table requires {required_channels}. Device index may have changed."
-        )
+    unavailable = [
+        route for route, entry in channel_map.items()
+        if any(channel < 0 or channel >= channels for channel in
+               ([entry["index"]] if isinstance(entry["index"], int) else entry["index"]))
+    ]
+    if unavailable:
+        # Validate each requested route in _submit. One unavailable back channel
+        # must not force valid front/surround routes into stereo fallback.
+        log_event(f"[Audio] {kind.upper()} idx={index} '{name}' exposes {channels} output channels; "
+                  f"unavailable routes: {', '.join(unavailable)}")
     samplerate = int(round(float(device.get("default_samplerate", 48000))))
     return index, channels, samplerate, _host(index), name
 

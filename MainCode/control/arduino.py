@@ -36,7 +36,7 @@ def connectArduino():
         return
 
     try:
-        for i in range(1, 71):  # Sets all digital pins as outputs for M1
+        for i in range(2, 70):  # Mega outputs 2 through 69; leave serial pins 0/1 alone.
             #  if i == 14 or i == 15:      #Pins we do not want to edit
             #      pass
             # else:

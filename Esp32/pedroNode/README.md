@@ -251,3 +251,18 @@ decoder completion is the speaker clock. This is amplitude-based animation,
 not phoneme recognition; wireless delivery and servo travel still add physical
 latency. Existing talk/start calls use it automatically. George retains his
 existing mouth timing. Restart MainCode; no ESP reflash is needed.
+
+
+## Temporary broken wing servo disable
+
+Wings are disabled in `MainCode/Animatronics/pedro.py` (`WINGS_ENABLED=False`)
+and `pedroNode.ino` (`PEDRO_WINGS_ENABLED=0`). Automatic motion keeps the wing
+field at rest and manual/web wing controls are unavailable. Beak, eyes and neck
+continue normally. After reflashing Pedro, GPIO23 is held LOW and its servo PWM
+channel is not attached, including at startup, off and timeout. The wire pose
+format is unchanged, so the USB bridge needs no update for this change.
+
+Restart MainCode for the animation change and reflash Pedro for physical PWM
+disable. To restore the replacement servo, enable both settings and restart/
+reflash again. The reported wing angle is a parked software value, not a
+measurement of the disconnected/disabled servo.

@@ -29,6 +29,29 @@ def run():
                 break
 
             # Sequencing here
+            while not rsm.get_pir_state("PIR7")["triggered"]:
+                if BreakCheck():
+                    break
+                t.sleep(.5)
+
+            m1Digital_Write(57, 0) #smoke machine
+            m1Digital_Write(56, 0) #lasers
+
+            wait(6)
+
+            m1Digital_Write(42, 0) #prop drop
+
+            wait(3)
+
+            m1Digital_Write(42, 1) #prop drop
+
+            wait(2)
+
+            m1Digital_Write(57, 1) #smoke machine
+
+            wait(20)
+
+            m1Digital_Write(56, 1) #lasers
 
             if BreakCheck() or house.Demo:
                 if house.Demo:

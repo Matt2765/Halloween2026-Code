@@ -20,6 +20,8 @@ class Radio {
 public:
   using Handler=Code (*)(const Received&);
   using Result=void (*)(const Packet&,Code,uint32_t);
+  using Rejection=void (*)(const Received&,Code);
+  void onRejection(Rejection callback) { rejection_=callback; }
   Registry registry; Counters stats;
   uint32_t session=0,sequence=0;
   bool begin(const char* id, Handler handler, Result result=nullptr);
@@ -33,6 +35,7 @@ public:
   uint32_t forwardedPackets=0,forwardFailures=0;
 private:
   char id_[16]={}; Handler handler_=nullptr; Result result_=nullptr;
+  Rejection rejection_=nullptr;
   QueueHandle_t urgent_=nullptr,telemetry_=nullptr;
   QueueHandle_t forwardUrgent_=nullptr,forwardTelemetry_=nullptr;
   bool extender_=false;

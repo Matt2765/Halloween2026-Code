@@ -26,6 +26,8 @@ HELD_FRESH_MS = 6000
 DEVICE_FRESH_MS = 6000
 SILENCE_RECONNECT_MS = 3500
 CONNECTION_LOG_INTERVAL_MS = 10000
+CONFLICT_QUIET_MS = 10000
+DELIVERY_FRESH_MS = 400
 PORT_HINTS = ("Silicon Labs", "CP210", "CH340", "USB-SERIAL", "ESP32", "WCH")
 MAX_DEVICES = 64
 MAX_COMMANDS = 128
@@ -35,6 +37,8 @@ PEDRO_STATES = ("off", "standby", "active")
 _manager = _proc = _shared = _txq = _commands = None
 _started = _disabled = False
 _tx_lock = threading.Lock()
+_lantern_lock = threading.RLock()
+_lantern_latches = {}  # device -> (boot session, sync generation, last house cue)
 
 
 def _now_ms():
@@ -104,11 +108,37 @@ class SerialLines:
         return lines
 
 
-def _store_device(shared, obj, now):
+def _record_rejection(shared, obj, reason, now, debug_info=False):
+    sid = obj["id"]
+    records = dict(shared.get("_rejections", {}))
+    old = records.get(sid, {})
+    detail = {key: obj.get(key) for key in ("mac", "observed_mac", "expected_mac", "session", "seq",
+                                          "expected_session", "expected_seq") if key in obj}
+    device = shared.get(sid)
+    if device:
+        for key, value in (("expected_mac", device["mac"]), ("expected_session", device["session"]),
+                           ("expected_seq", device["seq"])):
+            detail.setdefault(key, value)
+    rec = dict(detail, reason=reason, t_host_ms=now, count=old.get("count", 0) + 1,
+               logged_ms=old.get("logged_ms", -CONNECTION_LOG_INTERVAL_MS))
+    logged_reasons = dict(old.get("logged_reasons", {}))
+    if now - logged_reasons.get(reason, -CONNECTION_LOG_INTERVAL_MS) >= CONNECTION_LOG_INTERVAL_MS:
+        if reason != "old_sequence" or debug_info:
+            _log_event(f"{sid} report rejected: {reason}" + (f"; {detail}" if debug_info else ""))
+        rec["logged_ms"] = now
+        logged_reasons[reason] = now
+    rec["logged_reasons"] = logged_reasons
+    if sid in records or len(records) < MAX_DEVICES:
+        records[sid] = rec
+        shared["_rejections"] = records
+
+
+def _store_device(shared, obj, now, debug_info=False):
     """Validate before modifying state; ordering is per multi-button index."""
     queued = obj.get("queue_ms", 0)
     if not _uint32(queued):
         raise ValueError("Invalid bridge queue age")
+    received_at = now
     now -= queued  # Both bridge queue timestamps use its own clock, not ESP uptime subtraction.
     sid, kind, vals = obj.get("id"), obj.get("kind"), obj.get("vals")
     session, seq = obj.get("session"), obj.get("seq")
@@ -157,22 +187,39 @@ def _store_device(shared, obj, now):
     if not isinstance(mac, str) or not re.fullmatch(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}", mac):
         raise ValueError("Invalid device MAC")
     if rec:
-        if rec.get("conflict") or rec.get("mac") != mac:
+        if rec.get("mac") != mac:
             rec["conflict"] = True
+            rec["last_conflict_ms"] = received_at
             shared[sid] = rec
+            _record_rejection(shared, obj, "id_conflict", received_at, debug_info)
+            return False
+        if rec.get("conflict") and (received_at - rec.get("last_conflict_ms", received_at) < CONFLICT_QUIET_MS
+                                    or queued >= DELIVERY_FRESH_MS):
+            _record_rejection(shared, obj, "id_conflict", received_at, debug_info)
             return False
         if rec["session"] != session:
             if not _newer(session, rec["session"]):
+                _record_rejection(shared, obj, "old_session", received_at, debug_info)
                 return False
+            if queued >= DELIVERY_FRESH_MS:
+                return False
+            if debug_info:
+                _log_event(f"{sid} restarted: session {rec['session']} -> {session}")
+            previous_identity = rec
             rec = None  # A reboot invalidates every previous button state.
         elif rec["kind"] != kind:
             raise ValueError("Device kind changed within session")
-    elif len([key for key in shared.keys() if not key.startswith("_")]) >= MAX_DEVICES:
+        else:
+            previous_identity = rec
+    else:
+        previous_identity = None
+    if rec is None and previous_identity is None and len([key for key in shared.keys() if not key.startswith("_")]) >= MAX_DEVICES:
         raise ValueError("Device table full")
     previous = rec
     if kind == "button" and rec:
         previous = rec.get("buttons", {}).get(str(vals["btn"]))
     if previous and not _newer(seq, previous["seq"]):
+        _record_rejection(shared, obj, "old_sequence", received_at, debug_info)
         return False
     new = {"id": sid, "kind": kind, "session": session, "seq": seq,
            "mac": mac, "vals": vals, "t_host_ms": now, "fw": obj.get("fw"),
@@ -186,15 +233,21 @@ def _store_device(shared, obj, now):
         if rec:
             new["t_host_ms"] = max(now, rec["t_host_ms"])
     shared[sid] = new
+    if previous_identity is None and debug_info:
+        _log_event(f"{sid} first report; mac={mac}; session={session}; seq={seq}")
+    if previous_identity and previous_identity.get("conflict"):
+        _log_event(f"{sid} identity conflict cleared; original board resumed")
+        if shared.get("_error", {}).get("message") == f"ID conflict: {sid}":
+            del shared["_error"]
     return True
 
 
-def _ingest(shared, commands, obj, now):
+def _ingest(shared, commands, obj, now, debug_info=False):
     if not isinstance(obj, dict) or obj.get("v") != 1:
         raise ValueError("Incompatible USB protocol")
     kind = obj.get("type")
     if kind == "device":
-        return _store_device(shared, obj, now)
+        return _store_device(shared, obj, now, debug_info)
     if kind == "bridge":
         if not _uint32(obj.get("session")):
             raise ValueError("Invalid bridge session")
@@ -218,8 +271,13 @@ def _ingest(shared, commands, obj, now):
         if obj.get("error") == "id_conflict":
             if rec:
                 rec["conflict"] = True
+                if obj.get("observed_mac") != rec["mac"] or "last_conflict_ms" not in rec:
+                    rec["last_conflict_ms"] = now
                 shared[sid] = rec
             shared["_error"] = {"message": f"ID conflict: {sid}", "t_host_ms": now}
+            _record_rejection(shared, obj, "id_conflict", now, debug_info)
+        elif obj.get("error") in ("old_session", "old_sequence"):
+            _record_rejection(shared, obj, obj["error"], now, debug_info)
         elif rec:
             rec["diagnostics"] = obj.get("vals", {})
             shared[sid] = rec  # Diagnostics do not refresh measurement/state age.
@@ -244,11 +302,6 @@ def _log_device_changes(previous, current, now, debug_info=False):
     sid, kind, vals = current["id"], current["kind"], current["vals"]
     if current.get("conflict"):
         return
-    if debug_info and kind == "dropdown" and previous:
-        if previous["session"] != current["session"]:
-            _log_event(f"{sid} restarted: session {previous['session']} -> {current['session']}")
-        elif now - previous["t_host_ms"] >= DEVICE_FRESH_MS and now - current["t_host_ms"] < DEVICE_FRESH_MS:
-            _log_event(f"{sid} telemetry resumed after {now - previous['t_host_ms']} ms")
     if previous and (previous["session"] != current["session"] or previous.get("conflict")):
         previous = None
     if kind in ("button", "dropdown"):
@@ -274,17 +327,23 @@ def _log_device_changes(previous, current, now, debug_info=False):
 
 
 def _log_dropdown_commands(commands, logged, debug_info=False):
-    """Log each completed dropdown outcome once, including the submission snapshot."""
-    if not debug_info:
-        return
+    """Persist lantern failures; include detailed dropdown outcomes in debug mode."""
     records = dict(commands.items())
     for cid in list(logged):
         if cid not in records:
             del logged[cid]
     for cid, rec in records.items():
+        status = rec["status"]
+        if rec.get("op") == "lantern" and status in ("rejected", "unconfirmed"):
+            if logged.get(cid) != status:
+                _log_event(f"{rec['id']} lantern cue {rec.get('duration_ms')} {status}: "
+                           f"{rec.get('detail') or rec.get('reason', 'unknown')}")
+                logged[cid] = status
+            continue
+        if not debug_info:
+            continue
         if rec.get("kind") != "dropdown" and rec["id"] != "DROPDOWN1":
             continue
-        status = rec["status"]
         if status in ("queued", "pending") or logged.get(cid) == status:
             continue
         _log_event(f"{rec['id']} {rec.get('op')}={rec.get('value')} {status}: "
@@ -295,10 +354,32 @@ def _log_dropdown_commands(commands, logged, debug_info=False):
         logged[cid] = status
 
 
+def _log_device_health(shared, states, now, debug_info=False):
+    for sid, rec in list(shared.items()):
+        if sid.startswith("_"):
+            continue
+        age = max(0, now - rec["t_host_ms"])
+        state = "conflict" if rec.get("conflict") else "silent" if age >= DEVICE_FRESH_MS else "reporting"
+        previous = states.get(sid)
+        if state != previous:
+            if state == "silent":
+                sleeping = rec["kind"] == "button" and not any(b["pressed"] for b in rec.get("buttons", {}).values())
+                if sleeping:
+                    if debug_info:
+                        _log_event(f"{sid} has no recent reports; released battery buttons may be sleeping")
+                else:
+                    _log_event(f"{sid} telemetry unavailable")
+            elif state == "reporting" and previous == "silent" and debug_info:
+                _log_event(f"{sid} telemetry resumed; mac={rec['mac']}; session={rec['session']}; seq={rec['seq']}")
+            states[sid] = state
+
+
 def _monitor_main(shared, commands, txq, port, baud, debug_info=False):
     backoff = 0.25
     last_error_log = None
     logged_commands = {}
+    device_health = {}
+    last_health = 0
     _log_event(f"Starting monitor on {port or 'auto-detected port'} at {baud} baud")
     while True:
         connection = None
@@ -325,7 +406,7 @@ def _monitor_main(shared, commands, txq, port, baud, debug_info=False):
                             continue  # Drain pre-handshake USB records without refreshing state.
                         received_at = _now_ms()
                         previous = shared.get(obj.get("id")) if isinstance(obj, dict) and obj.get("type") == "device" else None
-                        accepted = _ingest(shared, commands, obj, received_at)
+                        accepted = _ingest(shared, commands, obj, received_at, debug_info)
                         if accepted and obj.get("type") == "device":
                             _log_device_changes(previous, shared[obj["id"]], received_at, debug_info)
                         last_valid = _now_ms()
@@ -365,6 +446,9 @@ def _monitor_main(shared, commands, txq, port, baud, debug_info=False):
                     if rec["status"] in ("queued", "pending") and now - rec["created_ms"] > 2000:
                         commands[cid] = dict(rec, status="unconfirmed", reason="result_timeout", t_host_ms=now)
                 _log_dropdown_commands(commands, logged_commands, debug_info)
+                if now - last_health >= 500:
+                    _log_device_health(shared, device_health, now, debug_info)
+                    last_health = now
         except (OSError, serial.SerialException, RuntimeError) as error:
             shared["_connection"] = {"connected": False}
             shared["_error"] = {"message": str(error), "t_host_ms": _now_ms()}
@@ -396,6 +480,8 @@ def init(port=None, baud=DEFAULT_BAUD):
         return
     if _proc and _proc.is_alive():
         return
+    with _lantern_lock:
+        _lantern_latches.clear()
     if _manager is None:
         _manager = mp.Manager()
     _shared, _commands = _manager.dict(), _manager.dict()
@@ -409,6 +495,8 @@ def init(port=None, baud=DEFAULT_BAUD):
 
 def stop():
     global _proc, _started, _txq
+    with _lantern_lock:
+        _lantern_latches.clear()
     if _proc and _proc.is_alive():
         _proc.terminate()
         _proc.join(timeout=1)
@@ -749,41 +837,66 @@ def get_george_state(device_id="GEORGE1"):
 def lantern(command_id, state, lantern_ids=None):
     """Issue a numbered cue; return {device_id: delivery UUID} for status checks.
 
-    lantern_ids: one ID, an iterable of IDs, or None for all fresh lanterns
-    synced and waiting for this cue. During a room demo, untargeted cues use
-    each synced lantern's reported next_command_id instead of the room cue ID.
-    Explicit targets still obey the supplied cue ID and local sync/sequence gates.
-    Call the next cue after telemetry confirms next_command_id.
-    No replay or automatic catch-up occurs for absent lanterns.
+    Untargeted house cue 1 enrolls fresh, synced lanterns waiting for 1.
+    Later house cues follow that group's intended progress even after a lost
+    delivery. Updated node firmware accepts forward jumps within the same
+    sync generation; missed effects are never replayed. Telemetry remains the
+    actual confirmed state, not an assumed success. Re-sync/reboot detaches a
+    lantern until a new cue 1. Multiple groups can occupy different rooms.
+    Demo mode and explicit targets use telemetry/manual addressing as before.
     """
     if type(command_id) is not int or not 1 <= command_id < 0xffffffff:
         raise ValueError("Lantern command ID must be 1..4294967294")
     if state not in LANTERN_STATES:
         raise ValueError(f"Lantern state must be one of {LANTERN_STATES}")
-    demo_mode = False
-    records = {}
-    if lantern_ids is None:
-        from context import house
-        demo_mode = bool(house.Demo)
-        records = snapshot()
-        targets = [sid for sid, rec in records.items() if rec["kind"] == "lantern" and
-                   rec["vals"].get("synced") and
-                   type(rec["vals"].get("next_command_id")) is int and
-                   1 <= rec["vals"]["next_command_id"] < 0xffffffff and
-                   (demo_mode or rec["vals"]["next_command_id"] == command_id) and
-                   device_status(sid)["available"]]
-    else:
-        targets = [lantern_ids] if isinstance(lantern_ids, str) else list(lantern_ids)
-    if any(not _valid_id(sid) for sid in targets):
-        raise ValueError("Invalid lantern device ID")
-    results = {}
-    for sid in dict.fromkeys(targets):
-        rec = records.get(sid) if lantern_ids is None else get(sid)
-        generation = rec["vals"].get("sync_generation", 0) if rec else 0
-        cue_id = rec["vals"]["next_command_id"] if demo_mode else command_id
-        results[sid] = tx_to_id(sid, {"cmd": "lantern", "state": state, "cue_id": cue_id,
-                                     "sync_generation": generation})
-    return results
+    with _lantern_lock:
+        demo_mode = False
+        records = {}
+        if lantern_ids is None:
+            from context import house
+            demo_mode = bool(house.Demo)
+            records = snapshot()
+            # A button press changes generation, including a quick re-sync
+            # back to cue 1 before the old group's next room cue arrives.
+            for sid, latch in list(_lantern_latches.items()):
+                rec = records.get(sid)
+                if (not rec or rec["kind"] != "lantern" or not rec["vals"].get("synced")
+                        or rec.get("conflict")
+                        or (rec["session"], rec["vals"].get("sync_generation")) != latch[:2]):
+                    del _lantern_latches[sid]
+            targets = []
+            for sid, rec in records.items():
+                if rec["kind"] != "lantern" or not rec["vals"].get("synced") or rec.get("conflict"):
+                    continue
+                next_cue = rec["vals"].get("next_command_id")
+                if type(next_cue) is not int or not 1 <= next_cue < 0xffffffff:
+                    continue
+                if demo_mode:
+                    if device_status(sid)["available"]:
+                        targets.append(sid)
+                    continue
+                if (command_id == 1 and next_cue == 1 and sid not in _lantern_latches
+                        and device_status(sid)["available"]):
+                    _lantern_latches[sid] = (rec["session"], rec["vals"]["sync_generation"], 0)
+                latch = _lantern_latches.get(sid)
+                if latch is not None and latch[2] + 1 == command_id:
+                    targets.append(sid)
+        else:
+            targets = [lantern_ids] if isinstance(lantern_ids, str) else list(lantern_ids)
+        if any(not _valid_id(sid) for sid in targets):
+            raise ValueError("Invalid lantern device ID")
+        results = {}
+        for sid in dict.fromkeys(targets):
+            rec = records.get(sid) if lantern_ids is None else get(sid)
+            generation = rec["vals"].get("sync_generation", 0) if rec else 0
+            cue_id = rec["vals"]["next_command_id"] if demo_mode else command_id
+            results[sid] = tx_to_id(sid, {"cmd": "lantern", "state": state, "cue_id": cue_id,
+                                         "sync_generation": generation})
+            if lantern_ids is None and not demo_mode:
+                # An unconfirmed/rejected send must not strand this group's
+                # future cues. No claim is made that hardware accepted it.
+                _lantern_latches[sid] = (rec["session"], generation, command_id)
+        return results
 
 
 def button_pop(timeout=0.0):

@@ -9,11 +9,13 @@ from utils.thread_diagnostics import dump_threads
 from control.animatronic_service import stop_all
 from control.doors import DOOR_SOLENOID_PINS, apply_door_shutdown_state
 from control.dimmer_controller import dim
+from control.group_flow import flow
 
 def shutdown():
     log_event("[Shutdown] Executing shutdown routine...")
 
     house.HouseActive = False
+    flow.stop()
     house.testing = False
     for door in DOOR_SOLENOID_PINS:
         apply_door_shutdown_state(door)
@@ -40,7 +42,6 @@ def shutdown():
 
     # ---------------- Shower Hallway ----------------
     log_event("SHUTDOWN - Shower Hallway:")
-    m1Digital_Write(30, 1); log_event("+120v Blacklight (M) OFF")
     m1Digital_Write(32, 1); log_event("+120v Strobe 4 (M) OFF")
     m1Digital_Write(34, 1); log_event("+120v Shower Light (M) OFF")
     m1Digital_Write(36, 1); log_event("+120v Lanterns (M) OFF")
@@ -60,10 +61,11 @@ def shutdown():
 
     # ---------------- Dynamic Hallway ----------------
     log_event("SHUTDOWN - Dynamic Hallway:")
+    m1Digital_Write(9, 1); log_event("+120v Blacklights (I) OFF")
     m1Digital_Write(4, 1); log_event("+120v Lightning Strip (D) OFF")
     m1Digital_Write(7, 1); log_event("+120v Strobe (J) OFF")
     m1Digital_Write(23, 1); log_event("+120v Lanterns (I) OFF")
-    # Pending pin assignments: blacklights (I, red), smoke machine 2 (J).
+    # Pending pin assignment: smoke machine 2 (J).
 
     # ---------------- Pallet Hallway ----------------
     log_event("SHUTDOWN - Pallet Hallway:")

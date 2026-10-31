@@ -72,6 +72,11 @@ Reports occur every 500 ms and on transitions, expire after six seconds at the
 host, and use the existing replaceable telemetry slots. Commands retain the
 existing per-device addressing, bridge retries, boot fence and ACK semantics.
 RSM adds `lantern(command_id, state, lantern_ids=None)` and `get_lantern_state`.
+Untargeted house cue 1 enrolls synced lanterns into a host-tracked group. Later
+cues follow intended group progress despite missing ACKs/telemetry. Lantern
+firmware accepts forward cue jumps within the same sync generation, sets its
+next cue to accepted cue + 1, and rejects older/duplicate cues. A re-sync or
+boot change detaches the old group; there is no replay of missed effects.
 State 6 is `strobe`; states 0..5 retain their existing values. Bridge and lantern
 firmware must both be updated to accept/report strobe. Off-to-flicker brightness
 ramps are generated locally and do not change the packet layout.

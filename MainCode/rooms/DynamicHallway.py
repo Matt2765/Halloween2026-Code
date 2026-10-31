@@ -9,6 +9,8 @@ from control.houseLights import toggleHouseLights
 import threading
 from control.dimmer_controller import dim
 import random
+from control.group_flow import flow
+from control.room_sequence import sequence_wait, SequenceStopped
 
 _lightning_lock = threading.RLock()
 _lightning_stop = threading.Event()
@@ -28,6 +30,7 @@ _lightning_audio = []
 # threading.Thread(target=function_name, daemon=True, name="DynamicHallway effect").start()
 
 def run():
+    wait = sequence_wait
     log_event("[DynamicHallway] Starting...")
     house.DynamicHallway_state = "ACTIVE"
 
@@ -43,40 +46,40 @@ def run():
                 m1Digital_Write(23, 0)
 
             '''while not rsm.get_button_value("BTN2"):
-                t.sleep(.1)
+                wait(.1)
                 if BreakCheck():
                     break'''
 
-            while house.Bathroom_state != "ACTIVE":
-                if BreakCheck() or house.Demo:
-                    break
-                t.sleep(.5)
-
-            while house.Bathroom_state != "STANDBY":
-                if BreakCheck() or house.Demo:
-                    break
-                t.sleep(.5)
-            
-            while(
-                rsm.get_pir_state("PIR3")["triggered"] is False
-            ):
+            # Bathroom posts one arrival after Door 4 opens and PIR3 trips.
+            # Keep waiting while the group is held behind the closed door.
+            group = None
+            while group is None and not house.Demo:
                 if BreakCheck():
-                    break
-                t.sleep(.5)
+                    return
+                if house.DoorState.get(4) == "OPEN":
+                    group = flow.take_hallway_arrival()
+                if group is None:
+                    wait(.05)
 
             if BreakCheck():
-                break
+                return
+
+            log_event(f"[DynamicHallway] Starting group {group} after Door 4 opened")
+
+            play_audio("DynamicHallway", "dynamicHallwayMusic1.wav", gain=1)
             blastLightning(threaded=True)
 
             wait(3)
 
+            scare_triggered = False
             for i in range(120): #12 sec
                 if rsm.get_button_value("BTN4"):
+                    scare_triggered = True
                     stopBlastLightning()
                     '''for i in range(10):
                         if not rsm.get_button_value("BTN4"):
                             break
-                        t.sleep(.1)'''
+                        wait(.1)'''
 
                     stopBlastLightning()
 
@@ -85,11 +88,11 @@ def run():
                     
                     m1Digital_Write(23, 1) #dynamic hallway lanterns
 
-                    t.sleep(1)
+                    wait(1)
 
                     m1Digital_Write(7, 0) #strobe
 
-                    t.sleep(.25)
+                    wait(.25)
 
                     rsm.lantern(8, "strobe")
 
@@ -103,11 +106,12 @@ def run():
 
                     m1Digital_Write(7, 1) #strobe
                     break
-                t.sleep(.1)
+                wait(.1)
                 if BreakCheck():
                     break
 
-            rsm.lantern(9, "flickering_on")
+            if not scare_triggered and not BreakCheck():
+                _restore_lanterns_after_timeout()
 
             if BreakCheck() or house.Demo:
                 if house.Demo:
@@ -116,11 +120,32 @@ def run():
                     toggleHouseLights(True)
                 break
 
-            t.sleep(0.1)
+            wait(0.1)
+    except SequenceStopped:
+        pass
     finally:
         stopBlastLightning()
         house.DynamicHallway_state = "INACTIVE"
         log_event("[DynamicHallway] Exiting.")
+
+def _restore_lanterns_after_timeout():
+    """Consume the unused scare cue without strobing, then restore cue 9."""
+    pending = set(rsm.lantern(8, "flickering_on"))
+    deadline = t.monotonic() + 1.5
+    # An ACK can precede telemetry. Wait for the reported next cue before
+    # submitting 9, which otherwise filters out lanterns still reporting 8.
+    while pending and not BreakCheck() and t.monotonic() < deadline:
+        for device_id in list(pending):
+            state = rsm.get_lantern_state(device_id)
+            if not state.get("available") or not state.get("synced") or state.get("next_command_id") != 8:
+                pending.remove(device_id)
+        if pending:
+            t.sleep(.02)
+    if not BreakCheck():
+        if pending:
+            log_event(f"[DynamicHallway] Lantern timeout cue 8 not confirmed: {', '.join(sorted(pending))}")
+        rsm.lantern(9, "flickering_on")
+
 
 def _lightning_wait(stop_event, seconds):
     """Explicit stops wake immediately; house cancellation is checked every 20 ms."""
